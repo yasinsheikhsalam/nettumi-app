@@ -19,27 +19,29 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Prepare Project
+      - name: Extract and Organize
         run: |
-          # ১. আপনার আপলোড করা জিপ ফাইলটি আনজিপ করা
+          # জিপ ফাইল আনজিপ করা
           unzip Nettumi-Android-Fixed.zip
           
-          # ২. প্রজেক্টের মেইন ফোল্ডার খুঁজে বের করা
+          # প্রজেক্টের আসল ফোল্ডার খুঁজে বের করা
           PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
-          echo "Project found at: $PROJ_DIR"
           
-          # ৩. ফাইলগুলো একদম সামনে (Root) নিয়ে আসা যেন গিটহাব খুঁজে পায়
+          # সব ফাইল মেইন ডিরেক্টরিতে মুভ করা যেন কনফিগারেশন এরর না হয়
           cp -r $PROJ_DIR/* . || true
           
-          # ৪. Gradle Wrapper JAR নিশ্চিত করা
+          # জিপ ফাইল এবং অপ্রয়োজনীয় ফোল্ডার মুছে ফেলা যেন ক্লিন থাকে
+          rm Nettumi-Android-Fixed.zip || true
+          
+          # Gradle Wrapper JAR ডাউনলোড করা
           mkdir -p gradle/wrapper
           curl -L https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
           
-          # ৫. পারমিশন দেওয়া
           chmod +x gradlew
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Build with Clean
+        # বিল্ড করার আগে ক্যাশে পরিষ্কার করা যেন আগের এররগুলো না আসে
+        run: ./gradlew clean assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
