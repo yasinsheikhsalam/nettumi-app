@@ -27,14 +27,23 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Download Gradle Wrapper JAR
-        run: curl -L -o extracted/nettumi_project/Android/Sngine/gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.9.0/gradle/wrapper/gradle-wrapper.jar
+        working-directory: extracted/nettumi_project/Android/Sngine
+        run: curl -L -o gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.9.0/gradle/wrapper/gradle-wrapper.jar
 
       - name: Grant execute permission for gradlew
-        run: chmod +x extracted/nettumi_project/Android/Sngine/gradlew
+        working-directory: extracted/nettumi_project/Android/Sngine
+        run: chmod +x gradlew
 
       - name: Build Debug APK
         working-directory: extracted/nettumi_project/Android/Sngine
         run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nettumi-Debug-APK
+          path: extracted/nettumi_project/Android/Sngine/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30        run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
