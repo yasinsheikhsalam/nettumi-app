@@ -18,22 +18,25 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          # ক্যাশে বন্ধ করে দেওয়া হয়েছে যেন এরর না আসে
 
-      - name: Unzip Project
+      - name: Prepare Files
         run: |
-          # আপনার রিপোজিটরিতে থাকা যেকোনো জিপ ফাইল আনজিপ করবে
-          unzip *.zip
+          # যদি কোনো জিপ ফাইল থাকে তবে সেটি আনজিপ করবে
+          if ls *.zip 1> /dev/null 2>&1; then
+            unzip *.zip
+            PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
+            cp -r $PROJ_DIR/* . || true
+          fi
           
-          # প্রজেক্ট ফোল্ডারটি খুঁজে বের করা
-          PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
-          echo "Project found at: $PROJ_DIR"
-          
-          # ফাইলগুলোকে মেইন ডিরেক্টরিতে মুভ করা যেন বিল্ড সহজ হয়
-          cp -r $PROJ_DIR/* . || true
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x gradlew
+          # gradlew ফাইলটি খুঁজে পারমিশন দেওয়া
+          GRADLEW_PATH=$(find . -name "gradlew" | head -n 1)
+          if [ -f "$GRADLEW_PATH" ]; then
+            chmod +x "$GRADLEW_PATH"
+            # যদি gradlew মেইন ডিরেক্টরিতে না থাকে তবে মুভ করা
+            if [ "$GRADLEW_PATH" != "./gradlew" ]; then
+              cp -r $(dirname "$GRADLEW_PATH")/* . || true
+            fi
+          fi
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
