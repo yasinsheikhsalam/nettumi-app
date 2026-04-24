@@ -13,23 +13,29 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21  # জাভা ভার্সন ১৭ থেকে বাড়িয়ে ২১ করা হয়েছে
+      - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
-          cache: gradle
 
       - name: Prepare Project
         run: |
+          # ১. আপনার আপলোড করা জিপ ফাইলটি আনজিপ করা
           unzip Nettumi-Android-Fixed.zip
+          
+          # ২. প্রজেক্টের মেইন ফোল্ডার খুঁজে বের করা
           PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
+          echo "Project found at: $PROJ_DIR"
+          
+          # ৩. ফাইলগুলো একদম সামনে (Root) নিয়ে আসা যেন গিটহাব খুঁজে পায়
           cp -r $PROJ_DIR/* . || true
           
-          # Gradle Wrapper JAR ডাউনলোড (নিরাপত্তার জন্য)
+          # ৪. Gradle Wrapper JAR নিশ্চিত করা
           mkdir -p gradle/wrapper
           curl -L https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
           
+          # ৫. পারমিশন দেওয়া
           chmod +x gradlew
 
       - name: Build Debug APK
