@@ -1,4 +1,4 @@
-name: Build Nettumi APK
+Name: Build Nettumi APK
 
 on:
   push:
@@ -13,12 +13,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Install unzip
-        run: sudo apt-get install -y unzip
-
-      - name: Unzip Source Code
-        run: unzip Nettumi-Android-Fixed.zip -d extracted
-
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -26,32 +20,20 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Download Gradle Wrapper JAR
-        working-directory: extracted/nettumi_project/Android/Sngine
-        run: curl -L -o gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.9.0/gradle/wrapper/gradle-wrapper.jar
+      - name: Unzip Source Code
+        run: |
+          unzip Nettumi-Android-Fixed.zip
+          # এই কমান্ডটি ফাইলগুলোকে সঠিক জায়গায় নিয়ে আসবে যেন গিটহাব তা খুঁজে পায়
+          cp -r nettumi_project/Android/Sngine/* . || true
 
       - name: Grant execute permission for gradlew
-        working-directory: extracted/nettumi_project/Android/Sngine
         run: chmod +x gradlew
 
       - name: Build Debug APK
-        working-directory: extracted/nettumi_project/Android/Sngine
         run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Debug-APK
-          path: extracted/nettumi_project/Android/Sngine/app/build/outputs/apk/debug/app-debug.apk      - name: Build Debug APK
-        working-directory: extracted/nettumi_project/Android/Sngine
-        run: ./gradlew assembleDebug --stacktrace
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Nettumi-Debug-APK
-          path: extracted/nettumi_project/Android/Sngine/app/build/outputs/apk/debug/app-debug.apk
-          retention-days: 30
+          path: app/build/outputs/apk/debug/app-debug.apk
