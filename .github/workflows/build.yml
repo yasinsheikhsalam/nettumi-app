@@ -1,4 +1,4 @@
-Name: Build Nettumi APK
+name: Build Nettumi APK
 
 on:
   push:
@@ -20,13 +20,22 @@ jobs:
           distribution: temurin
           cache: gradle
 
-      - name: Unzip Source Code
+      - name: Unzip and Move Files
         run: |
+          # জিপ ফাইলটির নাম আপনার রিপোজিটরির সাথে মিলিয়ে নিন
           unzip Nettumi-Android-Fixed.zip
-          # এই কমান্ডটি ফাইলগুলোকে সঠিক জায়গায় নিয়ে আসবে যেন গিটহাব তা খুঁজে পায়
-          cp -r nettumi_project/Android/Sngine/* . || true
+          
+          # ফাইলগুলো যেখানেই থাকুক, সেগুলোকে মেইন ডিরেক্টরিতে নিয়ে আসা
+          find . -name "gradlew" -exec chmod +x {} +
+          
+          # যেখানে build.gradle আছে সেই ফোল্ডারে যাওয়া
+          PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
+          echo "Project found in: $PROJ_DIR"
+          
+          # ফাইলগুলো মেইন ডিরেক্টরিতে মুভ করা
+          cp -r $PROJ_DIR/* . || true
 
-      - name: Grant execute permission for gradlew
+      - name: Grant execute permission
         run: chmod +x gradlew
 
       - name: Build Debug APK
@@ -35,5 +44,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
+          name: Nettumi-Debug-APK
+          path: app/build/outputs/apk/debug/app-debug.apk        with:
           name: Nettumi-Debug-APK
           path: app/build/outputs/apk/debug/app-debug.apk
