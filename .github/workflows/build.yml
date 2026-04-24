@@ -13,26 +13,23 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21  # জাভা ভার্সন ১৭ থেকে বাড়িয়ে ২১ করা হয়েছে
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
+          cache: gradle
 
       - name: Prepare Project
         run: |
-          # ১. আনজিপ করা
           unzip Nettumi-Android-Fixed.zip
-          
-          # ২. সঠিক ফোল্ডার খুঁজে বের করে ফাইলগুলো সামনে আনা
           PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
           cp -r $PROJ_DIR/* . || true
           
-          # ৩. Gradle Wrapper JAR ডাউনলোড করা (যদি মিসিং থাকে)
+          # Gradle Wrapper JAR ডাউনলোড (নিরাপত্তার জন্য)
           mkdir -p gradle/wrapper
           curl -L https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
           
-          # ৪. পারমিশন সেট করা
           chmod +x gradlew
 
       - name: Build Debug APK
@@ -42,16 +39,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk          # যদি gradlew মেইন ডিরেক্টরিতে না থাকে তবে কপি করে আনা
-          cp "$GRADLEW_PATH" . || true
-
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Nettumi-Debug-APK
-          path: |
-            app/build/outputs/apk/debug/*.apk
-            **/build/outputs/apk/debug/*.apk
+          path: app/build/outputs/apk/debug/*.apk
