@@ -19,24 +19,23 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Prepare Files
+      - name: Extract and Prepare Files
         run: |
-          # যদি কোনো জিপ ফাইল থাকে তবে সেটি আনজিপ করবে
-          if ls *.zip 1> /dev/null 2>&1; then
-            unzip *.zip
-            PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
-            cp -r $PROJ_DIR/* . || true
-          fi
+          # আপনার আপলোড করা নির্দিষ্ট জিপ ফাইলটি আনজিপ করা
+          unzip Nettumi-Android-Fixed.zip
+          
+          # প্রজেক্টের মেইন ফোল্ডার (যেখানে build.gradle আছে) খুঁজে বের করা
+          PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
+          echo "Project structure found at: $PROJ_DIR"
+          
+          # ফাইলগুলো মেইন ডিরেক্টরিতে মুভ করা যেন বিল্ড হতে পারে
+          cp -r $PROJ_DIR/* . || true
           
           # gradlew ফাইলটি খুঁজে পারমিশন দেওয়া
           GRADLEW_PATH=$(find . -name "gradlew" | head -n 1)
-          if [ -f "$GRADLEW_PATH" ]; then
-            chmod +x "$GRADLEW_PATH"
-            # যদি gradlew মেইন ডিরেক্টরিতে না থাকে তবে মুভ করা
-            if [ "$GRADLEW_PATH" != "./gradlew" ]; then
-              cp -r $(dirname "$GRADLEW_PATH")/* . || true
-            fi
-          fi
+          chmod +x "$GRADLEW_PATH"
+          # যদি gradlew মেইন ডিরেক্টরিতে না থাকে তবে কপি করে আনা
+          cp "$GRADLEW_PATH" . || true
 
       - name: Build Debug APK
         run: ./gradlew assembleDebug --stacktrace
