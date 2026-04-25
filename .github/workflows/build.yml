@@ -18,11 +18,20 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Prepare Project
+      - name: Prepare Project and Fix Gradle
         run: |
+          # ফাইল আনজিপ করা
           unzip Nettumi-Android-Fixed.zip
+          
+          # প্রজেক্ট ডিরেক্টরি খুঁজে বের করা
           PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
           cp -r $PROJ_DIR/* . || true
+          
+          # Gradle Wrapper ফাইলগুলো ম্যানুয়ালি ডাউনলোড করা (যদি মিসিং থাকে)
+          mkdir -p gradle/wrapper
+          curl -L https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
+          
+          # এক্সিকিউশন পারমিশন দেওয়া
           chmod +x gradlew
 
       - name: Build and Sign Release APK
