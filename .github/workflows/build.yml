@@ -1,4 +1,4 @@
-Name: Build Nettumi Adda APK
+name: Build Nettumi Adda APK
 
 on:
   push:
@@ -25,30 +25,19 @@ jobs:
           flutter-version: 3.24.0
           channel: stable
 
-      - name: Prepare Project and Keystore
-        run: |
-          # ১. সোর্স কোড আনজিপ করা
-          unzip Nettumi-Adda-Source.zip -d extracted
-          
-          # ২. আপনার ছোট হাতের অক্ষরের কী-স্টোর জিপটি আনজিপ করা
-          unzip nettumi-keystore.zip
-          
-          # ৩. কী-স্টোর ফাইলটি সঠিক জায়গায় রিনেম করে নেওয়া
-          mv *.keystore nettumi.keystore || true
+      - name: Install unzip
+        run: sudo apt-get install -y unzip
+
+      - name: Unzip Source Code
+        run: unzip Nettumi-Adda-Source.zip -d extracted
 
       - name: Flutter pub get
         working-directory: extracted/nettumi_adda_full
         run: flutter pub get
 
-      - name: Build Signed APK
+      - name: Build APK
         working-directory: extracted/nettumi_adda_full
-        run: |
-          flutter build apk --release --no-shrink \
-          --build-name=1.0.0 --build-number=1 \
-          --dart-define=KEYSTORE_PATH=$(pwd)/../../nettumi.keystore \
-          --dart-define=KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
-          --dart-define=KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
-          --dart-define=KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
+        run: flutter build apk --release --no-shrink
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
