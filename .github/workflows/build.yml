@@ -18,21 +18,32 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Prepare Project and Fix Gradle
+      - name: Prepare Project and Keystore
         run: |
-          # ফাইল আনজিপ করা
+          # ১. অ্যান্ড্রয়েড সোর্স কোড আনজিপ করা
           unzip Nettumi-Android-Fixed.zip
-          
-          # প্রজেক্ট ডিরেক্টরি খুঁজে বের করা
           PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
           cp -r $PROJ_DIR/* . || true
           
-          # Gradle Wrapper ফাইলগুলো ম্যানুয়ালি ডাউনলোড করা (যদি মিসিং থাকে)
+          # ২. আপনার ছোট হাতের অক্ষরের জিপ ফাইলটি আনজিপ করা
+          unzip nettumi-keystore.zip
+          
+          # ৩. ভেতরে থাকা .keystore ফাইলটি খুঁজে বের করা এবং রিনেম করা
+          mv *.keystore nettumi.keystore || true
+          
+          # ৪. Gradle Wrapper ফিক্স করা যেন এরর না আসে
           mkdir -p gradle/wrapper
           curl -L https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
-          
-          # এক্সিকিউশন পারমিশন দেওয়া
           chmod +x gradlew
+
+      - name: Verify Keystore File
+        run: |
+          if [ -f "nettumi.keystore" ]; then
+            echo "Keystore is ready for signing!"
+          else
+            echo "Error: nettumi.keystore not found inside the zip. Please check the file inside zip."
+            exit 1
+          fi
 
       - name: Build and Sign Release APK
         run: |
