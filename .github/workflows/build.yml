@@ -1,14 +1,13 @@
-name: Build Nettumi APK
+name: Build Nettumi Release APK
 
 on:
   push:
-    branches: [ main, master ]
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,32 +18,23 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Extract and Organize
+      - name: Prepare Project
         run: |
-          # জিপ ফাইল আনজিপ করা
           unzip Nettumi-Android-Fixed.zip
-          
-          # প্রজেক্টের আসল ফোল্ডার খুঁজে বের করা
           PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
-          
-          # সব ফাইল মেইন ডিরেক্টরিতে মুভ করা যেন কনফিগারেশন এরর না হয়
           cp -r $PROJ_DIR/* . || true
-          
-          # জিপ ফাইল এবং অপ্রয়োজনীয় ফোল্ডার মুছে ফেলা যেন ক্লিন থাকে
-          rm Nettumi-Android-Fixed.zip || true
-          
-          # Gradle Wrapper JAR ডাউনলোড করা
-          mkdir -p gradle/wrapper
-          curl -L https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
-          
           chmod +x gradlew
 
-      - name: Build with Clean
-        # বিল্ড করার আগে ক্যাশে পরিষ্কার করা যেন আগের এররগুলো না আসে
-        run: ./gradlew clean assembleDebug --stacktrace
+      - name: Build and Sign Release APK
+        run: |
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=$(pwd)/nettumi.keystore \
+            -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} \
+            -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} \
+            -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
 
-      - name: Upload APK
+      - name: Upload Release APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nettumi-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
+          name: Nettumi-Release-APK
+          path: app/build/outputs/apk/release/*.apk
