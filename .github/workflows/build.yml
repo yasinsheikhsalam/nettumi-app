@@ -1,60 +1,57 @@
-name: Build Nettumi Release APK
+Name: Build Nettumi Adda APK
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 21
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
-          distribution: 'temurin'
+          java-version: 17
+          distribution: temurin
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.24.0
+          channel: stable
 
       - name: Prepare Project and Keystore
         run: |
-          # ১. অ্যান্ড্রয়েড সোর্স কোড আনজিপ করা
-          unzip Nettumi-Android-Fixed.zip
-          PROJ_DIR=$(find . -name "build.gradle" -exec dirname {} + | head -n 1)
-          cp -r $PROJ_DIR/* . || true
+          # ১. সোর্স কোড আনজিপ করা
+          unzip Nettumi-Adda-Source.zip -d extracted
           
-          # ২. আপনার ছোট হাতের অক্ষরের জিপ ফাইলটি আনজিপ করা
+          # ২. আপনার ছোট হাতের অক্ষরের কী-স্টোর জিপটি আনজিপ করা
           unzip nettumi-keystore.zip
           
-          # ৩. ভেতরে থাকা .keystore ফাইলটি খুঁজে বের করা এবং রিনেম করা
+          # ৩. কী-স্টোর ফাইলটি সঠিক জায়গায় রিনেম করে নেওয়া
           mv *.keystore nettumi.keystore || true
-          
-          # ৪. Gradle Wrapper ফিক্স করা যেন এরর না আসে
-          mkdir -p gradle/wrapper
-          curl -L https://raw.githubusercontent.com/gradle/gradle/v8.9.0/gradle/wrapper/gradle-wrapper.jar -o gradle/wrapper/gradle-wrapper.jar
-          chmod +x gradlew
 
-      - name: Verify Keystore File
+      - name: Flutter pub get
+        working-directory: extracted/nettumi_adda_full
+        run: flutter pub get
+
+      - name: Build Signed APK
+        working-directory: extracted/nettumi_adda_full
         run: |
-          if [ -f "nettumi.keystore" ]; then
-            echo "Keystore is ready for signing!"
-          else
-            echo "Error: nettumi.keystore not found inside the zip. Please check the file inside zip."
-            exit 1
-          fi
+          flutter build apk --release --no-shrink \
+          --build-name=1.0.0 --build-number=1 \
+          --dart-define=KEYSTORE_PATH=$(pwd)/../../nettumi.keystore \
+          --dart-define=KEYSTORE_PASSWORD=${{ secrets.KEYSTORE_PASSWORD }} \
+          --dart-define=KEY_ALIAS=${{ secrets.KEY_ALIAS }} \
+          --dart-define=KEY_PASSWORD=${{ secrets.KEY_PASSWORD }}
 
-      - name: Build and Sign Release APK
-        run: |
-          ./gradlew assembleRelease \
-            -Pandroid.injected.signing.store.file=$(pwd)/nettumi.keystore \
-            -Pandroid.injected.signing.store.password=${{ secrets.KEYSTORE_PASSWORD }} \
-            -Pandroid.injected.signing.key.alias=${{ secrets.KEY_ALIAS }} \
-            -Pandroid.injected.signing.key.password=${{ secrets.KEY_PASSWORD }}
-
-      - name: Upload Release APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nettumi-Release-APK
-          path: app/build/outputs/apk/release/*.apk
+          name: Nettumi-Adda-APK
+          path: extracted/nettumi_adda_full/build/app/outputs/flutter-apk/app-release.apk
