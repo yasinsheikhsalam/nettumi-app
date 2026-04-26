@@ -22,7 +22,7 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          # ডার্ট ৩.৬.০+ এর প্রয়োজনীয়তা মেটাতে একদম লেটেস্ট ফ্লাটার ব্যবহার করা হয়েছে
+          # ডার্ট ৩.৬.০+ এর প্রয়োজনীয়তা মেটাতে নতুন ফ্লাটার ভার্সন ব্যবহার করা হয়েছে
           flutter-version: 3.27.1
           channel: stable
 
@@ -31,53 +31,50 @@ jobs:
 
       - name: Extract Files
         run: |
+          # পুরনো কোনো ফাইল থাকলে মুছে পরিষ্কার করা
+          rm -rf extracted
           unzip -o Nettumi-Adda-Source.zip -d extracted
           unzip -o nettumi-keystore.zip
           mv *.keystore nettumi.keystore || true
 
-      - name: Force Fix Dependencies (Auto-Healing)
+      - name: Fix Dependencies (Auto-Solve)
         working-directory: extracted/nettumi_adda_full
         run: |
           python3 - << 'PYEOF'
           import re
-          import os
-
-          pubspec_path = 'pubspec.yaml'
-          with open(pubspec_path, 'r') as f:
+          with open('pubspec.yaml', 'r') as f:
               content = f.read()
-
-          # সমস্যাযুক্ত প্যাকেজগুলো সরিয়ে দিচ্ছে অথবা ভার্সন ফিক্স করছে
-          content = re.sub(r'custom_lint:.*', 'custom_lint: any', content)
-          content = re.sub(r'riverpod_lint:.*', 'riverpod_lint: any', content)
+          # Claude এর সাজেস্ট করা প্যাকেজ ফিক্সগুলো একবারে করা হচ্ছে
+          content = re.sub(r'easy_localization:.*', 'easy_localization: ^3.0.3', content)
           content = re.sub(r'intl:.*', 'intl: any', content)
           content = re.sub(r'flutter_lints:.*', 'flutter_lints: any', content)
-
-          # কনফ্লিক্ট মেটাতে ওভাররাইড যোগ করা হচ্ছে
-          override_text = "\ndependency_overrides:\n  intl: any\n  custom_lint: any\n  riverpod_lint: any\n"
+          content = re.sub(r'custom_lint:.*', 'custom_lint: any', content)
+          content = re.sub(r'riverpod_lint:.*', 'riverpod_lint: any', content)
+          
           if 'dependency_overrides:' not in content:
-              content += override_text
-
-          with open(pubspec_path, 'w') as f:
+              content += '\ndependency_overrides:\n  intl: any\n  custom_lint: any\n'
+          
+          with open('pubspec.yaml', 'w') as f:
               f.write(content)
           PYEOF
-          echo "Dependencies fixed automatically."
+          flutter clean
+          flutter pub get
 
-      - name: Setup Android Build
+      - name: Configure Keystore
         run: |
           mkdir -p extracted/nettumi_adda_full/android/app/
           cp nettumi.keystore extracted/nettumi_adda_full/android/app/nettumi.keystore
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
 
-      - name: Build APK (Ignore All Warnings)
+      - name: Build Signed APK
         working-directory: extracted/nettumi_adda_full
         run: |
-          flutter clean
-          flutter pub get
-          # আইকন বা ছোটখাটো ভুল পুরোপুরি এড়িয়ে বিল্ড করার নির্দেশ
+          # গ্রেডল এরর এড়াতে সরাসরি ফ্লাটার বিল্ড কমান্ড ব্যবহার করা নিরাপদ
           flutter build apk --release --no-shrink --no-tree-shake-icons --build-name=1.0.0 --build-number=1
 
-      - name: Upload APK
+      - name: Upload Finished APK
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-APK
-          path: extracted/nettumi_adda_full/build/app/outputs/flutter-apk/app-release.apk
+          # ওয়াইল্ডকার্ড ব্যবহার করা হয়েছে যাতে ফাইলটি যেখানেই তৈরি হোক তা খুঁজে পায়
+          path: extracted/nettumi_adda_full/build/app/outputs/flutter-apk/*.apk
