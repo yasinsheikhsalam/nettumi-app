@@ -22,59 +22,35 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.0'
+          flutter-version: '3.22.3' # Claude AI এর সাজেস্ট করা স্টেবল ভার্সন
           channel: 'stable'
 
-      - name: Prepare Project and Keystore
+      - name: Prepare Files
         run: |
-          # ১. সোর্স কোড এবং কী-স্টোর আনজিপ করা
+          # সোর্স কোড ও কী-স্টোর আনজিপ করা (ওভাররাইট মোডে)
           unzip -o Nettumi-Adda-Source.zip -d extracted
           unzip -o nettumi-keystore.zip
           
-          # ২. কী-স্টোর ফাইলটি সঠিক ফোল্ডারে নিয়ে যাওয়া
+          # কী-স্টোর সঠিক ফোল্ডারে পাঠানো
           mv *.keystore nettumi.keystore || true
           mkdir -p extracted/nettumi_adda_full/android/app/
           cp nettumi.keystore extracted/nettumi_adda_full/android/app/
 
-      - name: Create key.properties
+      - name: Setup Signing Properties
         run: |
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
 
-      - name: Flutter Build
+      - name: Flutter Clean & Get
         working-directory: extracted/nettumi_adda_full
         run: |
+          flutter clean
           flutter pub get
-          flutter build apk --release --no-shrink --build-name=1.0.0 --build-number=1
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Nettumi-Adda-APK
-          path: extracted/nettumi_adda_full/build/app/outputs/flutter-apk/app-release.apk          mv *.keystore nettumi.keystore || true
-          cp nettumi.keystore extracted/nettumi_adda_full/android/app/nettumi.keystore
-
-      - name: Create key.properties
-        run: printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
-
-      - name: Flutter pub get
-        working-directory: extracted/nettumi_adda_full
-        run: flutter pub get
-
-      - name: Generate routes
-        working-directory: extracted/nettumi_adda_full
-        run: flutter pub run build_runner build --delete-conflicting-outputs
-
-      - name: Flutter clean
-        working-directory: extracted/nettumi_adda_full
-        run: flutter clean
-
-      - name: Flutter pub get again
-        working-directory: extracted/nettumi_adda_full
-        run: flutter pub get
 
       - name: Build Signed APK
         working-directory: extracted/nettumi_adda_full
-        run: flutter build apk --release --no-shrink --build-name=1.0.0 --build-number=1
+        # ফাইল ওয়াচিং এরর এড়াতে --no-tree-shake-icons যোগ করা হয়েছে এবং সিনট্যাক্স শক্তিশালী করা হয়েছে
+        run: |
+          flutter build apk --release --no-shrink --no-tree-shake-icons --build-name=1.0.0 --build-number=1
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
