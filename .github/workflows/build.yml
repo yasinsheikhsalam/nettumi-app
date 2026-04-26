@@ -1,4 +1,4 @@
-name: Build Nettumi Adda APK (Pro Version)
+name: Build Nettumi Adda APK
 
 on:
   push:
@@ -22,18 +22,73 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Flutter (Latest Stable)
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable' # এটি সবসময় লেটেস্ট স্ট্যাবল ভার্সন নিশ্চিত করবে
+          channel: 'stable'
           cache: true
 
-      - name: Advanced Project Extraction
+      - name: Advanced Extraction & Path Fix
         run: |
-          # সোর্স কোড জিপ ফাইলটি খোঁজা এবং আনজিপ করা
-          ZIP_FILE=$(find . -name "*.zip" ! -name "*keystore*" | head -n 1)
-          if [ -z "$ZIP_FILE" ]; then
-            echo "Error: Source zip file not found!"
+          # যেকোনো জিপ ফাইল খুঁজে বের করা (সোর্স কোড)
+          SOURCE_ZIP=$(ls *.zip | grep -v "keystore" | head -n 1)
+          unzip -q "$SOURCE_ZIP" -d extracted
+          
+          # pubspec.yaml যেখানে আছে সেই ফোল্ডারটি খুঁজে বের করা
+          REAL_SOURCE=$(find $(pwd)/extracted -name "pubspec.yaml" -exec dirname {} \;)
+          echo "SOURCE_PATH=$REAL_SOURCE" >> $GITHUB_ENV
+          echo "Source found at: $REAL_SOURCE"
+
+      - name: Extract Keystore
+        run: |
+          KEYSTORE_ZIP=$(ls *keystore*.zip | head -n 1)
+          if [ ! -z "$KEYSTORE_ZIP" ]; then
+            unzip -q "$KEYSTORE_ZIP" -d keystore_temp
+            mkdir -p ${{ env.SOURCE_PATH }}/android/app/
+            # keystore বা jks ফাইল খুঁজে কপি করা
+            find keystore_temp -name "*.keystore" -o -name "*.jks" -exec cp {} ${{ env.SOURCE_PATH }}/android/app/nettumi.keystore \;
+          fi
+
+      - name: Configure Signing & local.properties
+        run: |
+          FLUTTER_BIN=$(which flutter)
+          FLUTTER_SDK_PATH=$(dirname $(dirname $FLUTTER_BIN))
+          CONF_DIR=${{ env.SOURCE_PATH }}/android
+          
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > $CONF_DIR/key.properties
+          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK_PATH" "$ANDROID_SDK_ROOT" > $CONF_DIR/local.properties
+          
+          chmod +x $CONF_DIR/gradlew
+
+      - name: Fix Maven Repo (StartApp SDK Fix)
+        working-directory: ${{ env.SOURCE_PATH }}/android
+        run: |
+          # build.gradle এ StartApp এর Maven রিপোজিটরি যুক্ত করা
+          sed -i '/repositories {/a \        maven { url "https://artifact.startapp.com/releases" }' build.gradle
+
+      - name: Flutter Pub Get & Upgrade
+        working-directory: ${{ env.SOURCE_PATH }}
+        run: |
+          flutter pub cache clean
+          flutter pub get || flutter pub upgrade
+
+      - name: Build Signed APK
+        working-directory: ${{ env.SOURCE_PATH }}
+        run: |
+          flutter build apk --release --build-name=2.0.0 --build-number=2 --no-shrink
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nettumi-Adda-v3-APK
+          path: ${{ env.SOURCE_PATH }}/build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Debug Logs On Failure
+        if: failure()
+        run: |
+          echo "=== Gradle Error Details ==="
+          cd ${{ env.SOURCE_PATH }}/android && ./gradlew assembleRelease --stacktrace 2>&1 | tail -200
             exit 1
           fi
           unzip -q "$ZIP_FILE" -d extracted
