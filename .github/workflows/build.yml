@@ -19,77 +19,90 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5' # স্থিতিশীল বিল্ডের জন্য এটি সেরা
+          flutter-version: '3.24.5' # স্থিতিশীলতার জন্য এই ভার্সনটি সেরা
           channel: 'stable'
 
-      - name: Extract Project & Keystore (Self-Healing)
+      - name: Smart Extract (Source & Keystore)
         run: |
-          # সোর্স কোড এবং কি-স্টোর আনজিপ করা
+          # সোর্স কোড আনজিপ
           unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted || true
           
-          # কি-স্টোর জিপটি নাম যাই হোক খুঁজে বের করে আনজিপ করবে
+          # কি-স্টোর জিপ ছোট/বড় হাতের যাই হোক খুঁজে বের করে আনজিপ করবে
           KEY_ZIP=$(find . -maxdepth 1 -iname "*keystore.zip*" | head -n 1)
-          unzip -q "$KEY_ZIP" -d keystore_folder || true
+          if [ -n "$KEY_ZIP" ]; then
+            unzip -q "$KEY_ZIP" -d keystore_folder || true
+          fi
           
-          # প্রোজেক্টের আসল ফোল্ডার খুঁজে বের করা
+          # প্রোজেক্টের আসল ফোল্ডার খুঁজে বের করা (যেখানে pubspec.yaml আছে)
           ROOT=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
           echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
           
           # কি-স্টোর ফাইলের আসল পাথ খুঁজে বের করা
-          K_FILE=$(find keystore_folder -name "*.keystore" | head -n 1)
+          K_FILE=$(find . -name "*.keystore" | head -n 1)
           echo "KEYSTORE_PATH=$K_FILE" >> $GITHUB_ENV
 
-      - name: Auto-Fix pubspec.yaml (Conflict Solver)
+      - name: Repair pubspec.yaml & Solve Conflicts
         run: |
           cd ${{ env.PROJECT_ROOT }}
           python3 - << 'PYEOF'
           import re, os
-          if os.path.exists('pubspec.yaml'):
-              with open('pubspec.yaml', 'r') as f: content = f.read()
-              # সব বড় বড় প্যাকেজ যেগুলোতে এরর আসে সেগুলোকে any করে দেওয়া হচ্ছে
+          path = 'pubspec.yaml'
+          if os.path.exists(path):
+              with open(path, 'r') as f: lines = f.readlines()
+              
+              # ১. সিনট্যাক্স এরর ঠিক করা (ভুল লাইন মুছে ফেলা)
+              fixed_lines = []
+              for line in lines:
+                  if "Unexpected child" in line or "·" in line: continue
+                  fixed_lines.append(line)
+              
+              content = "".join(fixed_lines)
+              
+              # ২. ভার্সন কনফ্লিক্ট ঠিক করা (সবগুলোকে any করে দেওয়া)
               pkgs = ['intl', 'share_plus', 'cached_network_image', 'custom_lint', 'riverpod_lint']
               for p in pkgs:
                   content = re.sub(f'{p}:.*', f'{p}: any', content)
               
-              # Dependency Overrides যোগ করা যাতে ভার্সন জোর করে মেলে
+              # ৩. Dependency Overrides যোগ করা
               if 'dependency_overrides:' not in content:
                   content += '\ndependency_overrides:\n'
               for p in pkgs:
                   if p not in content.split('dependency_overrides:')[1]:
                       content += f'  {p}: any\n'
               
-              with open('pubspec.yaml', 'w') as f: f.write(content)
-              print("Pubspec Auto-Fixed!")
+              with open(path, 'w') as f: f.write(content)
+              print("Pubspec Repaired and Conflicts Solved!")
           PYEOF
 
-      - name: Configure Signing & Properties
+      - name: Configure Signing (Auto-Path)
         run: |
-          # অ্যান্ড্রয়েড অ্যাপ ডিরেক্টরিতে কি-স্টোর এবং প্রোপার্টিজ সেট করা
-          mkdir -p ${{ env.PROJECT_ROOT }}/android/app
-          cp "${{ env.KEYSTORE_PATH }}" "${{ env.PROJECT_ROOT }}/android/app/nettumi.keystore" || true
+          # অ্যান্ড্রয়েড ফোল্ডার খুঁজে বের করা
+          ANDROID_DIR=$(find ${{ env.PROJECT_ROOT }} -name "android" -type d | head -n 1)
+          mkdir -p "$ANDROID_DIR/app"
           
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > ${{ env.PROJECT_ROOT }}/android/key.properties
-          printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > ${{ env.PROJECT_ROOT }}/android/local.properties
+          # কি-স্টোর কপি
+          cp "${{ env.KEYSTORE_PATH }}" "$ANDROID_DIR/app/nettumi.keystore" || echo "Keystore copy failed"
+          
+          # key.properties এবং local.properties তৈরি
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > "$ANDROID_DIR/key.properties"
+          printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > "$ANDROID_DIR/local.properties"
 
-      - name: Accept Licenses & Install NDK
-        run: |
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" || true
-
-      - name: Flutter Pub Get (Auto-Repair)
+      - name: Flutter Pub Repair & Get
         run: |
           cd ${{ env.PROJECT_ROOT }}
           flutter clean
-          flutter pub upgrade --major-versions # ভার্সন নিজে থেকে আপডেট করবে
+          flutter pub upgrade --major-versions
           flutter pub get
 
       - name: Build Signed APK
         run: |
           cd ${{ env.PROJECT_ROOT }}
-          # --verbose যোগ করা হয়েছে যাতে কোনো সমস্যা হলে ডিটেইল দেখা যায়
           flutter build apk --release --no-shrink --no-tree-shake-icons --verbose
 
       - name: Upload APK
