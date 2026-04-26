@@ -36,13 +36,15 @@ jobs:
       - name: Extract Project
         run: unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
 
-      # Write local.properties AFTER flutter-action so $FLUTTER_ROOT is set by the action
+      - name: Extract Keystore
+        run: |
+          unzip -q nettumi-keystore.zip -d keystore_extracted
+          cp keystore_extracted/nettumi.keystore ./nettumi.keystore
+          echo "Keystore: $(pwd)/nettumi.keystore"
+
       - name: Configure Signing & local.properties
         run: |
-          # Copy keystore to a stable path
-          cp extracted/nettumi_adda_full/android/app/nettumi.keystore ./nettumi.keystore
-
-          # Write key.properties (storeFile must be absolute path)
+          # Write key.properties with absolute storeFile path
           cat > extracted/nettumi_adda_full/android/key.properties << EOF
           storePassword=Nettumi@123
           keyPassword=Nettumi@123
@@ -50,32 +52,25 @@ jobs:
           storeFile=$(pwd)/nettumi.keystore
           EOF
 
-          # Derive Flutter SDK path reliably from the flutter binary set by subosito/flutter-action
+          # Get Flutter SDK path
           FLUTTER_BIN=$(which flutter)
           FLUTTER_SDK_PATH=$(dirname $(dirname $FLUTTER_BIN))
-          echo "Flutter SDK resolved to: $FLUTTER_SDK_PATH"
+          echo "Flutter SDK: $FLUTTER_SDK_PATH"
 
-          # Verify the gradle plugin path actually exists
-          if [ ! -d "$FLUTTER_SDK_PATH/packages/flutter_tools/gradle" ]; then
-            echo "ERROR: Flutter tools gradle directory not found at $FLUTTER_SDK_PATH/packages/flutter_tools/gradle"
-            ls "$FLUTTER_SDK_PATH/packages/" || true
-            exit 1
-          fi
-
-          # Write local.properties with both flutter.sdk and sdk.dir
+          # Write local.properties
           cat > extracted/nettumi_adda_full/android/local.properties << EOF
           flutter.sdk=$FLUTTER_SDK_PATH
           sdk.dir=$ANDROID_SDK_ROOT
           EOF
 
-          # Export for subsequent steps
           echo "FLUTTER_ROOT=$FLUTTER_SDK_PATH" >> $GITHUB_ENV
-          echo "FLUTTER_SDK=$FLUTTER_SDK_PATH" >> $GITHUB_ENV
 
-          echo "=== local.properties written ==="
+          echo "=== local.properties ==="
           cat extracted/nettumi_adda_full/android/local.properties
+          echo "=== key.properties ==="
+          cat extracted/nettumi_adda_full/android/key.properties
 
-      - name: Write correct pubspec.yaml
+      - name: Write pubspec.yaml
         run: |
           cat > extracted/nettumi_adda_full/pubspec.yaml << 'EOF'
           name: nettumi_adda
@@ -97,7 +92,7 @@ jobs:
             path_provider: ^2.1.5
             crypto: ^3.0.6
             permission_handler: ^11.3.1
-            record: ^5.1.2
+            record: 5.0.5
             just_audio: ^0.9.26
             auto_route: ^9.2.2
             flutter_riverpod: ^2.6.1
