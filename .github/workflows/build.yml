@@ -22,6 +22,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
+      # Flutter MUST be set up before anything else so FLUTTER_ROOT is available
       - name: Setup Flutter 3.24.5
         uses: subosito/flutter-action@v2
         with:
@@ -35,16 +36,44 @@ jobs:
       - name: Extract Project
         run: unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
 
+      # Write local.properties AFTER flutter-action so $FLUTTER_ROOT is set by the action
       - name: Configure Signing & local.properties
         run: |
+          # Copy keystore to a stable path
           cp extracted/nettumi_adda_full/android/app/nettumi.keystore ./nettumi.keystore
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' \
-            > extracted/nettumi_adda_full/android/key.properties
-          FLUTTER_SDK=$(which flutter | sed 's|/bin/flutter||')
-          echo "flutter.sdk=$FLUTTER_SDK" > extracted/nettumi_adda_full/android/local.properties
-          echo "sdk.dir=$ANDROID_SDK_ROOT" >> extracted/nettumi_adda_full/android/local.properties
-          echo "FLUTTER_ROOT=$FLUTTER_SDK" >> $GITHUB_ENV
-          echo "Flutter SDK: $FLUTTER_SDK"
+
+          # Write key.properties (storeFile must be absolute path)
+          cat > extracted/nettumi_adda_full/android/key.properties << EOF
+          storePassword=Nettumi@123
+          keyPassword=Nettumi@123
+          keyAlias=nettumi_alias
+          storeFile=$(pwd)/nettumi.keystore
+          EOF
+
+          # Derive Flutter SDK path reliably from the flutter binary set by subosito/flutter-action
+          FLUTTER_BIN=$(which flutter)
+          FLUTTER_SDK_PATH=$(dirname $(dirname $FLUTTER_BIN))
+          echo "Flutter SDK resolved to: $FLUTTER_SDK_PATH"
+
+          # Verify the gradle plugin path actually exists
+          if [ ! -d "$FLUTTER_SDK_PATH/packages/flutter_tools/gradle" ]; then
+            echo "ERROR: Flutter tools gradle directory not found at $FLUTTER_SDK_PATH/packages/flutter_tools/gradle"
+            ls "$FLUTTER_SDK_PATH/packages/" || true
+            exit 1
+          fi
+
+          # Write local.properties with both flutter.sdk and sdk.dir
+          cat > extracted/nettumi_adda_full/android/local.properties << EOF
+          flutter.sdk=$FLUTTER_SDK_PATH
+          sdk.dir=$ANDROID_SDK_ROOT
+          EOF
+
+          # Export for subsequent steps
+          echo "FLUTTER_ROOT=$FLUTTER_SDK_PATH" >> $GITHUB_ENV
+          echo "FLUTTER_SDK=$FLUTTER_SDK_PATH" >> $GITHUB_ENV
+
+          echo "=== local.properties written ==="
+          cat extracted/nettumi_adda_full/android/local.properties
 
       - name: Write correct pubspec.yaml
         run: |
@@ -132,6 +161,9 @@ jobs:
           flutter config --android-sdk $ANDROID_SDK_ROOT
           flutter pub get
 
+      - name: Accept Android licenses
+        run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
       - name: Build Signed APK
         working-directory: extracted/nettumi_adda_full
         run: flutter build apk --release --build-name=1.0.0 --build-number=1
@@ -140,7 +172,12 @@ jobs:
         if: failure()
         working-directory: extracted/nettumi_adda_full/android
         run: |
-          ./gradlew assembleRelease --stacktrace 2>&1 | grep -A 5 "Caused by\|Could not\|error:" | head -60
+          echo "=== local.properties ==="
+          cat local.properties || echo "NOT FOUND"
+          echo "=== key.properties ==="
+          cat key.properties || echo "NOT FOUND"
+          echo "=== Full Gradle stacktrace ==="
+          ./gradlew assembleRelease --stacktrace 2>&1 | tail -100
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
