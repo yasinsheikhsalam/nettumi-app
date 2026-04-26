@@ -22,54 +22,57 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          # আপনার প্যাকেজগুলোর সাথে সামঞ্জস্য রাখতে এই ভার্সনটি ব্যবহার করা হয়েছে
-          flutter-version: 3.22.3
+          # ডার্ট ৩.৫.০+ এর প্রয়োজনীয়তা মেটাতে নতুন ফ্লাটার ভার্সন ব্যবহার করা হয়েছে
+          flutter-version: 3.24.0 
           channel: stable
 
-      - name: Install unzip
+      - name: Install tools
         run: sudo apt-get install -y unzip
 
-      - name: Extract Project Files
-        run: |
-          unzip -o Nettumi-Adda-Source.zip -d extracted
-          unzip -o nettumi-keystore.zip
-          mv *.keystore nettumi.keystore || true
+      - name: Unzip Source Code
+        run: unzip -o Nettumi-Adda-Source.zip -d extracted
 
-      - name: Auto-Fix Dependencies (Smart Override)
+      - name: Fix pubspec dependencies
         working-directory: extracted/nettumi_adda_full
         run: |
-          # এই স্ক্রিপ্টটি pubspec.yaml ফাইলে সরাসরি হস্তক্ষেপ করে কনফ্লিক্ট মেটাবে
-          python3 - << 'EOF'
+          python3 - << 'PYEOF'
           import re
+
           with open('pubspec.yaml', 'r') as f:
               content = f.read()
-          
-          # intl এবং অন্যান্য কনফ্লিক্ট প্যাকেজ ঠিক করা
+
+          # সব কনফ্লিক্ট প্যাকেজ একবারে ফিক্স করা হচ্ছে
+          content = re.sub(r'easy_localization:.*', 'easy_localization: ^3.0.3', content)
+          content = re.sub(r'intl:.*', 'intl: ^0.19.0', content)
+          content = re.sub(r'flutter_lints:.*', 'flutter_lints: ^4.0.0', content)
+          content = re.sub(r'permission_handler:.*', 'permission_handler: ^11.3.1', content)
+
           if 'dependency_overrides:' not in content:
-              content += '\ndependency_overrides:\n'
-          
-          # আপনার এরর লগ অনুযায়ী নির্দিষ্ট ওভাররাইড যোগ করা হচ্ছে
-          overrides = "  intl: ^0.19.0\n  easy_localization: ^3.0.3\n  flutter_lints: ^4.0.0\n"
-          content += overrides
-          
+              content += '\ndependency_overrides:\n  intl: ^0.19.0\n  permission_handler: ^11.3.1\n'
+
           with open('pubspec.yaml', 'w') as f:
               f.write(content)
-          EOF
-          echo "Dependencies Overridden Successfully."
+          PYEOF
 
-      - name: Configure Android Signing
+      - name: Unzip Keystore
         run: |
+          unzip -o nettumi-keystore.zip
+          mv *.keystore nettumi.keystore || true
           mkdir -p extracted/nettumi_adda_full/android/app/
           cp nettumi.keystore extracted/nettumi_adda_full/android/app/nettumi.keystore
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
 
-      - name: Flutter Get and Build
+      - name: Create key.properties
+        run: printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
+
+      - name: Flutter pub get
         working-directory: extracted/nettumi_adda_full
         run: |
           flutter clean
           flutter pub get
-          # আইকন বা ছোটখাটো ভুল উপেক্ষা করে এপিকে তৈরি করবে
-          flutter build apk --release --no-shrink --no-tree-shake-icons --build-name=1.0.0 --build-number=1
+
+      - name: Build Signed APK
+        working-directory: extracted/nettumi_adda_full
+        run: flutter build apk --release --no-shrink --no-tree-shake-icons --build-name=1.0.0 --build-number=1
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
