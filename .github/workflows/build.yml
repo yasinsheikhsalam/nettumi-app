@@ -16,25 +16,41 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: 17
-          distribution: temurin
+          java-version: '17'
+          distribution: 'temurin'
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: 3.27.0
-          channel: stable
+          flutter-version: '3.27.0'
+          channel: 'stable'
 
-      - name: Install tools
-        run: sudo apt-get install -y unzip
-
-      - name: Unzip Source Code
-        run: unzip Nettumi-Adda-Source.zip -d extracted
-
-      - name: Unzip Keystore
+      - name: Prepare Project and Keystore
         run: |
-          unzip nettumi-keystore.zip
+          # ১. সোর্স কোড এবং কী-স্টোর আনজিপ করা
+          unzip -o Nettumi-Adda-Source.zip -d extracted
+          unzip -o nettumi-keystore.zip
+          
+          # ২. কী-স্টোর ফাইলটি সঠিক ফোল্ডারে নিয়ে যাওয়া
           mv *.keystore nettumi.keystore || true
+          mkdir -p extracted/nettumi_adda_full/android/app/
+          cp nettumi.keystore extracted/nettumi_adda_full/android/app/
+
+      - name: Create key.properties
+        run: |
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
+
+      - name: Flutter Build
+        working-directory: extracted/nettumi_adda_full
+        run: |
+          flutter pub get
+          flutter build apk --release --no-shrink --build-name=1.0.0 --build-number=1
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nettumi-Adda-APK
+          path: extracted/nettumi_adda_full/build/app/outputs/flutter-apk/app-release.apk          mv *.keystore nettumi.keystore || true
           cp nettumi.keystore extracted/nettumi_adda_full/android/app/nettumi.keystore
 
       - name: Create key.properties
