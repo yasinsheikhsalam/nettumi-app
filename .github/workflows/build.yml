@@ -1,4 +1,4 @@
-name: Build Nettumi Adda APK
+name: Build Nettumi Adda APK (Pro Version)
 
 on:
   push:
@@ -22,55 +22,80 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Flutter (Stable)
+      - name: Setup Flutter (Latest Stable)
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          channel: 'stable' # এটি সবসময় লেটেস্ট স্ট্যাবল ভার্সন নিশ্চিত করবে
           cache: true
 
-      - name: Configure Android Signing
+      - name: Advanced Project Extraction
+        run: |
+          # সোর্স কোড জিপ ফাইলটি খোঁজা এবং আনজিপ করা
+          ZIP_FILE=$(find . -name "*.zip" ! -name "*keystore*" | head -n 1)
+          if [ -z "$ZIP_FILE" ]; then
+            echo "Error: Source zip file not found!"
+            exit 1
+          fi
+          unzip -q "$ZIP_FILE" -d extracted
+          
+          # pubspec.yaml ফাইলের অবস্থান অনুযায়ী সোর্স ডিরেক্টরি সেট করা
+          REAL_SOURCE=$(find $(pwd)/extracted -name "pubspec.yaml" -exec dirname {} \;)
+          echo "SOURCE_PATH=$REAL_SOURCE" >> $GITHUB_ENV
+          echo "Found Source at: $REAL_SOURCE"
+
+      - name: Extract & Link Keystore
+        run: |
+          KEY_ZIP=$(find . -name "*keystore*.zip" | head -n 1)
+          if [ ! -z "$KEY_ZIP" ]; then
+            unzip -q "$KEY_ZIP" -d keystore_temp
+            # .keystore বা .jks ফাইল খুঁজে সঠিক জায়গায় কপি করা
+            mkdir -p ${{ env.SOURCE_PATH }}/android/app/
+            find keystore_temp -name "*.keystore" -o -name "*.jks" -exec cp {} ${{ env.SOURCE_PATH }}/android/app/nettumi.keystore \;
+          fi
+
+      - name: Auto-Fix Dependencies & Environment
+        working-directory: ${{ env.SOURCE_PATH }}
+        run: |
+          # এনভায়রনমেন্ট ক্লিন এবং ডিপেন্ডেন্সি আপডেট
+          flutter config --android-sdk $ANDROID_SDK_ROOT
+          flutter pub cache clean
+          # pubspec.yaml এ ভার্সন জনিত এরর থাকলে তা ফিক্স করার চেষ্টা
+          flutter pub get || flutter pub upgrade --major-versions
+          
+          # গ্র্যাডল পারমিশন ফিক্স
+          chmod +x android/gradlew
+
+      - name: Configure Signing & local.properties
         run: |
           FLUTTER_BIN=$(which flutter)
           FLUTTER_SDK_PATH=$(dirname $(dirname $FLUTTER_BIN))
-          # সরাসরি রুট ডিরেক্টরি ব্যবহার করা হচ্ছে
-          SOURCE_DIR=$(pwd)
+          CONF_DIR=${{ env.SOURCE_PATH }}/android
           
-          # Keystore কনফিগারেশন
-          KEYSTORE_PATH=$SOURCE_DIR/android/app/nettumi.keystore
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KEYSTORE_PATH" > $SOURCE_DIR/android/key.properties
-          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK_PATH" "$ANDROID_SDK_ROOT" > $SOURCE_DIR/android/local.properties
+          # signing properties তৈরি
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > $CONF_DIR/key.properties
+          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK_PATH" "$ANDROID_SDK_ROOT" > $CONF_DIR/local.properties
 
-      - name: Accept Android licenses
+      - name: Accept Android Licenses
         run: yes | flutter doctor --android-licenses || true
 
-      - name: Install NDK
-        run: $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" || true
-
-      - name: Flutter Pub Get & Upgrade
+      - name: Build Signed APK (High Reliability)
+        working-directory: ${{ env.SOURCE_PATH }}
         run: |
-          flutter pub cache clean
-          flutter pub get
-          # প্যাকেজ ভার্সন জনিত সমস্যা থাকলে এটি ফিক্স করার চেষ্টা করবে
-          flutter pub upgrade 
+          # বিল্ড করার আগে ক্লিন করে নেয়া যাতে পুরনো এরর না থাকে
+          flutter clean
+          flutter build apk --release --build-name=2.0.0 --build-number=2 --no-shrink
 
-      - name: Build Signed APK
-        run: |
-          flutter build apk --release \
-            --build-name=2.0.0 \
-            --build-number=2 \
-            --no-shrink
-
-      - name: Upload APK
+      - name: Upload Success APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Nettumi-Adda-v2-APK
-          path: build/app/outputs/flutter-apk/app-release.apk
+          name: Nettumi-Adda-Final-APK
+          path: ${{ env.SOURCE_PATH }}/build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Debug On Failure
+      - name: Advanced Debug On Failure
         if: failure()
         run: |
-          echo "=== Checking Files ==="
-          ls -R
-          echo "=== Gradle Stacktrace ==="
-          cd android && ./gradlew assembleRelease --stacktrace 2>&1 | tail -200
+          echo "=== Error Analysis ==="
+          cat ${{ env.SOURCE_PATH }}/pubspec.yaml || echo "pubspec not found"
+          echo "=== Gradle Logs ==="
+          cd ${{ env.SOURCE_PATH }}/android && ./gradlew assembleRelease --stacktrace 2>&1 | tail -300
