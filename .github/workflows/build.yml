@@ -18,58 +18,63 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          # ক্যাশ অপশনটি বাদ দেওয়া হয়েছে কারণ আপনার ফাইলগুলো ZIP এর ভেতর থাকে
-          # যার ফলে শুরুতে Gradle ফাইল খুঁজে না পেয়ে এরর দেয়
 
-      - name: Setup Flutter (Fast & Stable)
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.1'
+          flutter-version: '3.24.5'
           channel: 'stable'
 
       - name: Extract Project
         run: |
-          unzip -o Nettumi-Adda-Source.zip -d extracted
-          unzip -o nettumi-keystore.zip
-          mv *.keystore nettumi.keystore || true
+          # জিপ ফাইলটি ঠিকমতো এক্সট্র্যাক্ট করা
+          unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
+          # যদি কি-স্টোর ফাইলটি মেইন ডিরেক্টরিতে থাকে তবে সেটি অ্যাপ ফোল্ডারে কপি করা
+          find extracted -name "nettumi.keystore" -exec cp {} . \; || true
 
       - name: Configure Signing
         run: |
-          mkdir -p extracted/nettumi_adda_full/android/app/
-          cp nettumi.keystore extracted/nettumi_adda_full/android/app/nettumi.keystore
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
+          # প্রোজেক্টের ভেতর android/app ফোল্ডারটি খুঁজে বের করা
+          APP_DIR=$(find extracted -name "android" -type d | head -n 1)/app
+          cp nettumi.keystore "$APP_DIR/nettumi.keystore" || echo "Keystore not found, skipping copy"
+          
+          # key.properties তৈরি করা (ডাইনামিক পাথ)
+          PROPS_PATH=$(find extracted -name "android" -type d | head -n 1)/key.properties
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > "$PROPS_PATH"
 
-      - name: Auto-Fix Dependencies
-        working-directory: extracted/nettumi_adda_full
+      - name: Auto-Fix & Pub Get
         run: |
+          # প্রোজেক্টের মূল ফোল্ডার খুঁজে বের করা (যেখানে pubspec.yaml আছে)
+          PROJECT_ROOT=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
+          cd "$PROJECT_ROOT"
+          
+          # কমন এরর ফিক্স করতে ক্লিন করা
+          flutter clean
+          
+          # পাইথন দিয়ে ইনকম্প্যাটিবল ভার্সন অটো-ফিক্স করা
           python3 - << 'PYEOF'
-          import re
-          with open('pubspec.yaml', 'r') as f:
-              content = f.read()
-          # সব সমস্যাযুক্ত প্যাকেজকে any করে দেওয়া হচ্ছে যাতে কনফ্লিক্ট না হয়
-          packages = ['intl', 'custom_lint', 'riverpod_lint', 'easy_localization', 'flutter_lints']
+          import re, os
+          path = 'pubspec.yaml'
+          with open(path, 'r') as f: content = f.read()
+          # ভার্সন কনফ্লিক্ট এড়াতে any ব্যবহার
+          packages = ['intl', 'custom_lint', 'riverpod_lint', 'easy_localization']
           for pkg in packages:
               content = re.sub(f'{pkg}:.*', f'{pkg}: any', content)
-          
-          if 'dependency_overrides:' not in content:
-              content += '\ndependency_overrides:\n  intl: any\n  custom_lint: any\n'
-          
-          with open('pubspec.yaml', 'w') as f:
-              f.write(content)
+          with open(path, 'w') as f: f.write(content)
           PYEOF
-          flutter clean
+          
           flutter pub get
 
       - name: Build Signed APK
-        working-directory: extracted/nettumi_adda_full
-        env:
-          # এরর এড়াতে এনভায়রনমেন্ট ভেরিয়েবল সেট করা
-          ANDROID_HOME: /usr/local/lib/android/sdk
         run: |
-          flutter build apk --release --no-shrink --no-tree-shake-icons
+          PROJECT_ROOT=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
+          cd "$PROJECT_ROOT"
+          # বিল্ড কমান্ড (বড় ধরণের এররগুলো ইগনোর করার জন্য ফ্ল্যাগসহ)
+          flutter build apk --release --build-name=1.0.0 --build-number=1 --no-shrink --no-tree-shake-icons
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-APK
-          path: extracted/nettumi_adda_full/build/app/outputs/flutter-apk/*.apk
+          # ওয়াইল্ডকার্ড (*) ব্যবহার করা হয়েছে যাতে ফাইল যেখানেই তৈরি হোক খুঁজে পায়
+          path: extracted/**/build/app/outputs/flutter-apk/*.apk
