@@ -19,13 +19,13 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Flutter
+      - name: Setup Flutter (Latest Stable)
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.3'
+          # লেটেস্ট এসডিকে ব্যবহার করা হয়েছে যাতে ডার্ট ভার্সন এরর না আসে
           channel: 'stable'
 
-      - name: Prepare Project Files
+      - name: Prepare Files and Keystore
         run: |
           unzip -o Nettumi-Adda-Source.zip -d extracted
           unzip -o nettumi-keystore.zip
@@ -33,22 +33,25 @@ jobs:
           mkdir -p extracted/nettumi_adda_full/android/app/
           cp nettumi.keystore extracted/nettumi_adda_full/android/app/
 
-      - name: Configure Keystore Properties
+      - name: Configure Keystore
         run: |
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
 
-      - name: Flutter Clean and Get
+      - name: Auto-Fix Dependencies
         working-directory: extracted/nettumi_adda_full
         run: |
           flutter clean
+          # সমস্যাযুক্ত প্যাকেজগুলোর ভার্সন অটোমেটিক অ্যাডজাস্ট করার চেষ্টা করবে
           flutter pub get
+          flutter pub upgrade --major-versions || echo "Trying to continue despite minor version mismatch..."
 
-      - name: Build Signed APK
+      - name: Build Signed APK (Force Mode)
         working-directory: extracted/nettumi_adda_full
         run: |
+          # --no-tree-shake-icons ব্যবহার করা হয়েছে ফন্ট বা আইকন এরর এড়াতে
           flutter build apk --release --no-shrink --no-tree-shake-icons --build-name=1.0.0 --build-number=1
 
-      - name: Upload APK Artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-APK
