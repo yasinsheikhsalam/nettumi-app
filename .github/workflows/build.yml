@@ -30,9 +30,17 @@ jobs:
 
       - name: Extract Project & Keystore
         run: |
-          # সোর্স কোড এবং কি-স্টোর আনজিপ করা
+          # সোর্স কোড আনজিপ করা
           unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
-          unzip -q Nettumi-keystore.zip -d keystore_folder
+          
+          # কি-স্টোর জিপ ফাইলটি ছোট হাতের বা বড় হাতের অক্ষরে থাকতে পারে, তাই 'find' ব্যবহার করা হচ্ছে
+          KEYSTORE_ZIP=$(find . -maxdepth 1 -iname "nettumi-keystore.zip" | head -n 1)
+          if [ -z "$KEYSTORE_ZIP" ]; then
+            echo "Error: nettumi-keystore.zip not found!"
+            exit 1
+          fi
+          
+          unzip -q "$KEYSTORE_ZIP" -d keystore_folder
           
           # প্রোজেক্ট রুট খুঁজে বের করা
           ROOT=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
@@ -83,7 +91,7 @@ jobs:
       - name: Build Signed APK
         run: |
           cd ${{ env.PROJECT_ROOT }}
-          # বিস্তারিত লগ দেখার জন্য verbose ব্যবহার
+          # বিস্তারিত লগের জন্য verbose ব্যবহার
           flutter build apk --release --no-shrink --no-tree-shake-icons --verbose
 
       - name: Upload APK
