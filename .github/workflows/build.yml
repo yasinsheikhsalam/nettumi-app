@@ -10,71 +10,67 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Free Disk Space (বড় ফাইল ডিলিট করা)
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /usr/local/lib/android
+          sudo rm -rf /opt/ghc
+          echo "Disk space freed."
+
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: 17
-          distribution: temurin
+          java-version: '17'
+          distribution: 'temurin'
 
-      - name: Setup Flutter
+      - name: Setup Flutter (Fast & Stable)
         uses: subosito/flutter-action@v2
         with:
-          # ডার্ট ৩.৬.০+ এর প্রয়োজনীয়তা মেটাতে নতুন ফ্লাটার ভার্সন ব্যবহার করা হয়েছে
-          flutter-version: 3.27.1
-          channel: stable
+          # ম্যানুয়াল ডাউনলোডের বদলে এটি ব্যবহার করলে জায়গা কম খরচ হয়
+          flutter-version: '3.27.1'
+          channel: 'stable'
 
-      - name: Install tools
-        run: sudo apt-get install -y unzip
-
-      - name: Extract Files
+      - name: Extract Project
         run: |
-          # পুরনো কোনো ফাইল থাকলে মুছে পরিষ্কার করা
-          rm -rf extracted
           unzip -o Nettumi-Adda-Source.zip -d extracted
           unzip -o nettumi-keystore.zip
           mv *.keystore nettumi.keystore || true
 
-      - name: Fix Dependencies (Auto-Solve)
+      - name: Configure Signing
+        run: |
+          mkdir -p extracted/nettumi_adda_full/android/app/
+          cp nettumi.keystore extracted/nettumi_adda_full/android/app/nettumi.keystore
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
+
+      - name: Auto-Fix Dependencies
         working-directory: extracted/nettumi_adda_full
         run: |
           python3 - << 'PYEOF'
           import re
           with open('pubspec.yaml', 'r') as f:
               content = f.read()
-          # Claude এর সাজেস্ট করা প্যাকেজ ফিক্সগুলো একবারে করা হচ্ছে
-          content = re.sub(r'easy_localization:.*', 'easy_localization: ^3.0.3', content)
+          # কনফ্লিক্ট করা সব প্যাকেজকে 'any' করে দেওয়া হচ্ছে যাতে এরর না আসে
           content = re.sub(r'intl:.*', 'intl: any', content)
-          content = re.sub(r'flutter_lints:.*', 'flutter_lints: any', content)
           content = re.sub(r'custom_lint:.*', 'custom_lint: any', content)
           content = re.sub(r'riverpod_lint:.*', 'riverpod_lint: any', content)
-          
           if 'dependency_overrides:' not in content:
               content += '\ndependency_overrides:\n  intl: any\n  custom_lint: any\n'
-          
           with open('pubspec.yaml', 'w') as f:
               f.write(content)
           PYEOF
           flutter clean
           flutter pub get
 
-      - name: Configure Keystore
-        run: |
-          mkdir -p extracted/nettumi_adda_full/android/app/
-          cp nettumi.keystore extracted/nettumi_adda_full/android/app/nettumi.keystore
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
-
       - name: Build Signed APK
         working-directory: extracted/nettumi_adda_full
         run: |
-          # গ্রেডল এরর এড়াতে সরাসরি ফ্লাটার বিল্ড কমান্ড ব্যবহার করা নিরাপদ
-          flutter build apk --release --no-shrink --no-tree-shake-icons --build-name=1.0.0 --build-number=1
+          flutter build apk --release --no-shrink --no-tree-shake-icons
 
-      - name: Upload Finished APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-APK
-          # ওয়াইল্ডকার্ড ব্যবহার করা হয়েছে যাতে ফাইলটি যেখানেই তৈরি হোক তা খুঁজে পায়
           path: extracted/nettumi_adda_full/build/app/outputs/flutter-apk/*.apk
