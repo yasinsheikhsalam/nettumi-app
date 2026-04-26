@@ -22,35 +22,20 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Flutter (Latest Stable)
+      - name: Setup Flutter (Stable)
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable' # নির্দিষ্ট ভার্সন না দিয়ে লেটেস্ট স্ট্যাবল ব্যবহার করা হচ্ছে যাতে সামঞ্জস্য থাকে
+          channel: 'stable'
           cache: true
 
-      - name: Extract Project & Fix Permissions
+      - name: Configure Android Signing
         run: |
-          unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted || echo "Unzip failed or already extracted"
-          # সোর্স কোড যেখানেই থাকুক তা খুঁজে বের করা
-          SOURCE_DIR=$(find $(pwd)/extracted -name "pubspec.yaml" -exec dirname {} \;)
-          echo "SOURCE_DIR=$SOURCE_DIR" >> $GITHUB_ENV
-          chmod +x $SOURCE_DIR/android/gradlew || true
-
-      - name: Auto-fix pubspec.yaml & Environment
-        working-directory: ${{ env.SOURCE_DIR }}
-        run: |
-          # pubspec.yaml এর কোনো ইনডেন্টেশন সমস্যা থাকলে তা চেক করা (বেসিক ফিক্স)
-          # আপনি স্ক্রিনশটে share_plus: any তে এরর দেখিয়েছেন, আমরা pub repair করার চেষ্টা করব
-          flutter pub cache clean
-          flutter pub get || (echo "Attempting to fix pubspec..." && flutter pub upgrade)
-
-      - name: Configure Signing & local.properties
-        run: |
-          SOURCE_DIR=${{ env.SOURCE_DIR }}
           FLUTTER_BIN=$(which flutter)
           FLUTTER_SDK_PATH=$(dirname $(dirname $FLUTTER_BIN))
+          # সরাসরি রুট ডিরেক্টরি ব্যবহার করা হচ্ছে
+          SOURCE_DIR=$(pwd)
           
-          # Keystore চেক এবং কনফিগারেশন
+          # Keystore কনফিগারেশন
           KEYSTORE_PATH=$SOURCE_DIR/android/app/nettumi.keystore
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KEYSTORE_PATH" > $SOURCE_DIR/android/key.properties
           printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK_PATH" "$ANDROID_SDK_ROOT" > $SOURCE_DIR/android/local.properties
@@ -58,24 +43,34 @@ jobs:
       - name: Accept Android licenses
         run: yes | flutter doctor --android-licenses || true
 
-      - name: Build Signed APK (Auto-solving version issues)
-        working-directory: ${{ env.SOURCE_DIR }}
+      - name: Install NDK
+        run: $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" || true
+
+      - name: Flutter Pub Get & Upgrade
         run: |
-          # বিল্ড করার সময় যদি ভার্সন এরর আসে তবে এটি লেটেস্ট সাপোর্ট খুজবে
-          flutter build apk --release --build-name=2.0.0 --build-number=2 --no-shrink --no-pub
+          flutter pub cache clean
+          flutter pub get
+          # প্যাকেজ ভার্সন জনিত সমস্যা থাকলে এটি ফিক্স করার চেষ্টা করবে
+          flutter pub upgrade 
+
+      - name: Build Signed APK
+        run: |
+          flutter build apk --release \
+            --build-name=2.0.0 \
+            --build-number=2 \
+            --no-shrink
 
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-v2-APK
-          path: ${{ env.SOURCE_DIR }}/build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
+          path: build/app/outputs/flutter-apk/app-release.apk
 
       - name: Debug On Failure
         if: failure()
         run: |
-          echo "=== Displaying pubspec.yaml content for debugging ==="
-          cat ${{ env.SOURCE_DIR }}/pubspec.yaml
-          echo "=== Gradle Error Details ==="
-          cd ${{ env.SOURCE_DIR }}/android && ./gradlew assembleRelease --stacktrace 2>&1 | tail -100
+          echo "=== Checking Files ==="
+          ls -R
+          echo "=== Gradle Stacktrace ==="
+          cd android && ./gradlew assembleRelease --stacktrace 2>&1 | tail -200
