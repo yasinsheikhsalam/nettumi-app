@@ -19,10 +19,7 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Setup Flutter
+      - name: Setup Flutter 3.24.5
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.5'
@@ -30,39 +27,34 @@ jobs:
 
       - name: Extract Project
         run: |
-          # জিপ ফাইলটি ঠিকমতো এক্সট্র্যাক্ট করা
           unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
+          # প্রজেক্ট রুট খুঁজে বের করা যদি ফোল্ডার স্ট্রাকচার ভিন্ন হয়
+          PROJECT_PATH=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
+          echo "PROJECT_PATH=$PROJECT_PATH" >> $GITHUB_ENV
 
       - name: Configure Signing
         run: |
-          # ডাইনামিক পাথ ব্যবহার করে কি-স্টোর সেটআপ
-          PROJECT_ROOT=$(find extracted -name "android" -type d | head -n 1)
-          APP_DIR="$PROJECT_ROOT/app"
-          
-          # যদি জিপের ভেতর কি-স্টোর থাকে তবে কপি করা
-          find extracted -name "nettumi.keystore" -exec cp {} "$APP_DIR/nettumi.keystore" \; || true
+          # কি-স্টোর ফাইলটি সঠিক জায়গায় কপি করা
+          find extracted -name "nettumi.keystore" -exec cp {} $PROJECT_PATH/android/app/ \; || true
           
           # key.properties তৈরি করা
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > "$PROJECT_ROOT/key.properties"
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' \
+            > $PROJECT_PATH/android/key.properties
 
-      - name: Flutter Pub Get
+      - name: Flutter pub get
+        working-directory: ${{ env.PROJECT_PATH }}
         run: |
-          # যেখানে pubspec.yaml আছে সেই ফোল্ডারে যাওয়া
-          PROJECT_DIR=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
-          cd "$PROJECT_DIR"
-          flutter config --android-sdk $ANDROID_SDK_ROOT
+          flutter clean
           flutter pub get
 
       - name: Build Signed APK
+        working-directory: ${{ env.PROJECT_PATH }}
         run: |
-          PROJECT_DIR=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
-          cd "$PROJECT_DIR"
-          # কোনো কোড ছাড়াই সরাসরি বিল্ড
-          flutter build apk --release --no-shrink --no-tree-shake-icons
+          # বিল্ড আরও ডিটেইল ভাবে দেখার জন্য --verbose ফ্ল্যাগ যোগ করা হয়েছে
+          flutter build apk --release --no-shrink --no-tree-shake-icons --verbose
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-APK
-          # সাব-ডিরেক্টরি থেকে APK খুঁজে বের করা
-          path: extracted/**/build/app/outputs/flutter-apk/*.apk
+          path: ${{ env.PROJECT_PATH }}/build/app/outputs/flutter-apk/*.apk
