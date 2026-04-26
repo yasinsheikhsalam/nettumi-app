@@ -33,7 +33,9 @@ jobs:
         run: sudo apt-get install -y unzip
 
       - name: Extract Project
-        run: unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
+        run: |
+          unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
+          chmod +x extracted/Source/android/gradlew
 
       - name: Configure Signing & local.properties
         run: |
@@ -88,56 +90,3 @@ jobs:
         with:
           name: Nettumi-Adda-v2-APK
           path: extracted/Source/build/app/outputs/flutter-apk/app-release.apk
-      - name: Configure Signing & local.properties
-        run: |
-          FLUTTER_BIN=$(which flutter)
-          FLUTTER_SDK_PATH=$(dirname $(dirname $FLUTTER_BIN))
-
-          cat > extracted/nettumi_adda_full/android/key.properties << EOF
-          storePassword=Nettumi@123
-          keyPassword=Nettumi@123
-          keyAlias=nettumi_alias
-          storeFile=$(pwd)/extracted/nettumi_adda_full/android/app/nettumi.keystore
-          EOF
-
-          cat > extracted/nettumi_adda_full/android/local.properties << EOF
-          flutter.sdk=$FLUTTER_SDK_PATH
-          sdk.dir=$ANDROID_SDK_ROOT
-          EOF
-
-          echo "FLUTTER_ROOT=$FLUTTER_SDK_PATH" >> $GITHUB_ENV
-
-          echo "=== local.properties ==="
-          cat extracted/nettumi_adda_full/android/local.properties
-          echo "=== key.properties ==="
-          cat extracted/nettumi_adda_full/android/key.properties
-
-      - name: Flutter pub get
-        working-directory: extracted/nettumi_adda_full
-        run: |
-          flutter config --android-sdk $ANDROID_SDK_ROOT
-          flutter pub get
-
-      - name: Accept Android licenses
-        run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-      - name: Build Signed APK
-        working-directory: extracted/nettumi_adda_full
-        run: flutter build apk --release --build-name=1.0.0 --build-number=1
-
-      - name: Show full Gradle error
-        if: failure()
-        working-directory: extracted/nettumi_adda_full/android
-        run: |
-          echo "=== local.properties ==="
-          cat local.properties || echo "NOT FOUND"
-          echo "=== key.properties ==="
-          cat key.properties || echo "NOT FOUND"
-          echo "=== Gradle stacktrace ==="
-          ./gradlew assembleRelease --stacktrace 2>&1 | tail -150
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Nettumi-Adda-APK
-          path: extracted/nettumi_adda_full/build/app/outputs/flutter-apk/app-release.apk
