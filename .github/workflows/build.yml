@@ -22,50 +22,79 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5' # আগের সফল ভার্সনটি ব্যবহার করা নিরাপদ
+          flutter-version: '3.24.5' # স্থিতিশীল বিল্ডের জন্য এটি সেরা
           channel: 'stable'
 
-      - name: Extract Project & Keystore
+      - name: Extract Project & Keystore (Self-Healing)
         run: |
-          # সোর্স কোড আনজিপ
-          unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
+          # সোর্স কোড এবং কি-স্টোর আনজিপ করা
+          unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted || true
           
-          # কি-স্টোর আনজিপ (নাম ছোট বা বড় হাতের যাই হোক খুঁজে নেবে)
-          KEY_ZIP=$(find . -maxdepth 1 -iname "nettumi-keystore.zip")
-          unzip -q "$KEY_ZIP" -d keystore_folder
+          # কি-স্টোর জিপটি নাম যাই হোক খুঁজে বের করে আনজিপ করবে
+          KEY_ZIP=$(find . -maxdepth 1 -iname "*keystore.zip*" | head -n 1)
+          unzip -q "$KEY_ZIP" -d keystore_folder || true
           
           # প্রোজেক্টের আসল ফোল্ডার খুঁজে বের করা
           ROOT=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
           echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
           
-          # কি-স্টোর ফাইলের পাথ খুঁজে বের করা
+          # কি-স্টোর ফাইলের আসল পাথ খুঁজে বের করা
           K_FILE=$(find keystore_folder -name "*.keystore" | head -n 1)
           echo "KEYSTORE_PATH=$K_FILE" >> $GITHUB_ENV
 
-      - name: Configure Signing
+      - name: Auto-Fix pubspec.yaml (Conflict Solver)
         run: |
-          # কি-স্টোর ফাইলটি অ্যান্ড্রয়েড ফোল্ডারে নিয়ে আসা
+          cd ${{ env.PROJECT_ROOT }}
+          python3 - << 'PYEOF'
+          import re, os
+          if os.path.exists('pubspec.yaml'):
+              with open('pubspec.yaml', 'r') as f: content = f.read()
+              # সব বড় বড় প্যাকেজ যেগুলোতে এরর আসে সেগুলোকে any করে দেওয়া হচ্ছে
+              pkgs = ['intl', 'share_plus', 'cached_network_image', 'custom_lint', 'riverpod_lint']
+              for p in pkgs:
+                  content = re.sub(f'{p}:.*', f'{p}: any', content)
+              
+              # Dependency Overrides যোগ করা যাতে ভার্সন জোর করে মেলে
+              if 'dependency_overrides:' not in content:
+                  content += '\ndependency_overrides:\n'
+              for p in pkgs:
+                  if p not in content.split('dependency_overrides:')[1]:
+                      content += f'  {p}: any\n'
+              
+              with open('pubspec.yaml', 'w') as f: f.write(content)
+              print("Pubspec Auto-Fixed!")
+          PYEOF
+
+      - name: Configure Signing & Properties
+        run: |
+          # অ্যান্ড্রয়েড অ্যাপ ডিরেক্টরিতে কি-স্টোর এবং প্রোপার্টিজ সেট করা
           mkdir -p ${{ env.PROJECT_ROOT }}/android/app
-          cp "${{ env.KEYSTORE_PATH }}" "${{ env.PROJECT_ROOT }}/android/app/nettumi.keystore"
+          cp "${{ env.KEYSTORE_PATH }}" "${{ env.PROJECT_ROOT }}/android/app/nettumi.keystore" || true
           
-          # key.properties এবং local.properties ডাইনামিক ভাবে তৈরি
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > ${{ env.PROJECT_ROOT }}/android/key.properties
           printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > ${{ env.PROJECT_ROOT }}/android/local.properties
 
-      - name: Flutter pub get
+      - name: Accept Licenses & Install NDK
+        run: |
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager "ndk;27.0.12077973" || true
+
+      - name: Flutter Pub Get (Auto-Repair)
         run: |
           cd ${{ env.PROJECT_ROOT }}
           flutter clean
+          flutter pub upgrade --major-versions # ভার্সন নিজে থেকে আপডেট করবে
           flutter pub get
 
       - name: Build Signed APK
         run: |
           cd ${{ env.PROJECT_ROOT }}
-          flutter build apk --release --no-shrink --no-tree-shake-icons
+          # --verbose যোগ করা হয়েছে যাতে কোনো সমস্যা হলে ডিটেইল দেখা যায়
+          flutter build apk --release --no-shrink --no-tree-shake-icons --verbose
 
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Nettumi-Adda-APK
+          name: Nettumi-Adda-Fixed-APK
           path: ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/*.apk
