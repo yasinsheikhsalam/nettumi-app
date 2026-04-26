@@ -17,7 +17,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: '17'
-          distribution: 'temurin'
+          distribution: temurin
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -27,76 +27,118 @@ jobs:
         with:
           flutter-version: '3.24.5'
           channel: 'stable'
+          cache: true
 
-      - name: Extract Project & Keystore
-        run: |
-          # সোর্স কোড আনজিপ করা
-          unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
-          
-          # কি-স্টোর জিপ ফাইলটি ছোট হাতের বা বড় হাতের অক্ষরে থাকতে পারে, তাই 'find' ব্যবহার করা হচ্ছে
-          KEYSTORE_ZIP=$(find . -maxdepth 1 -iname "nettumi-keystore.zip" | head -n 1)
-          if [ -z "$KEYSTORE_ZIP" ]; then
-            echo "Error: nettumi-keystore.zip not found!"
-            exit 1
-          fi
-          
-          unzip -q "$KEYSTORE_ZIP" -d keystore_folder
-          
-          # প্রোজেক্ট রুট খুঁজে বের করা
-          ROOT=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
-          echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
-          
-          # কি-স্টোর ফাইল খুঁজে বের করা
-          KEYSTORE_FILE=$(find keystore_folder -name "*.keystore" | head -n 1)
-          echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> $GITHUB_ENV
+      - name: Install unzip
+        run: sudo apt-get install -y unzip
 
-      - name: Ultimate Dependency Auto-Fix
-        run: |
-          cd ${{ env.PROJECT_ROOT }}
-          python3 - << 'PYEOF'
-          import re, os
-          path = 'pubspec.yaml'
-          if os.path.exists(path):
-              with open(path, 'r') as f: content = f.read()
-              # কনফ্লিক্ট করা প্যাকেজগুলোকে any করে দেওয়া
-              pkgs = ['intl', 'custom_lint', 'riverpod_lint', 'share_plus', 'cached_network_image']
-              for p in pkgs:
-                  content = re.sub(f'{p}:.*', f'{p}: any', content)
-              
-              if 'dependency_overrides:' not in content:
-                  content += '\ndependency_overrides:\n'
-              for p in pkgs:
-                  if p not in content.split('dependency_overrides:')[1]:
-                      content += f'  {p}: any\n'
-              
-              with open(path, 'w') as f: f.write(content)
-          PYEOF
+      - name: Extract Project
+        run: unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
 
       - name: Configure Signing
         run: |
-          # অ্যান্ড্রয়েড অ্যাপ ডিরেক্টরিতে কি-স্টোর কপি করা
-          mkdir -p ${{ env.PROJECT_ROOT }}/android/app
-          cp "${{ env.KEYSTORE_PATH }}" "${{ env.PROJECT_ROOT }}/android/app/nettumi.keystore"
-          
-          # key.properties তৈরি করা
+          cp extracted/nettumi_adda_full/android/app/nettumi.keystore ./nettumi.keystore
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' \
-            > ${{ env.PROJECT_ROOT }}/android/key.properties
+            > extracted/nettumi_adda_full/android/key.properties
+
+      - name: Write correct pubspec.yaml
+        run: |
+          cat > extracted/nettumi_adda_full/pubspec.yaml << 'EOF'
+          name: nettumi_adda
+          description: Nettumi Adda
+          version: 1.0.0+3
+          environment:
+            sdk: ">=3.4.0 <4.0.0"
+          dependencies:
+            flutter:
+              sdk: flutter
+            cupertino_icons: ^1.0.8
+            onesignal_flutter: ^5.3.0
+            http: ^1.3.0
+            intl: ^0.19.0
+            shared_preferences: ^2.5.3
+            image_picker: ^1.1.2
+            url_launcher: ^6.3.1
+            flutter_svg: ^2.1.0
+            path_provider: ^2.1.5
+            crypto: ^3.0.6
+            permission_handler: ^11.3.1
+            record: ^5.1.2
+            just_audio: ^0.9.26
+            auto_route: ^9.2.2
+            flutter_riverpod: ^2.6.1
+            uuid: ^4.4.2
+            device_info_plus: ^10.1.2
+            cached_network_image: ^3.3.1
+            easy_localization: ^3.0.3
+            timeago_flutter: ^3.7.0
+            share_plus: ^7.2.2
+            flutter_slidable: ^3.1.1
+            flutter_spinkit: ^5.2.1
+            flutter_html: ^3.0.0-beta.2
+            multi_select_flutter: ^4.1.3
+            pinput: ^5.0.1
+            qr_flutter: ^4.1.0
+            photo_view: ^0.14.0
+            flutter_image_gallery_saver: ^0.0.2
+          dev_dependencies:
+            flutter_test:
+              sdk: flutter
+            build_runner: ^2.4.13
+            auto_route_generator: ^9.0.0
+            flutter_lints: ^3.0.2
+            custom_lint: ^0.6.4
+            riverpod_lint: ^2.3.7
+            logger: ^2.5.0
+          dependency_overrides:
+            intl: 0.19.0
+          flutter:
+            uses-material-design: true
+            assets:
+              - assets/images/
+              - assets/images/icons/
+              - assets/images/icons/chat/
+              - assets/images/icons/navbar/
+              - assets/images/icons/settings/
+              - assets/images/icons/social/
+              - assets/images/snackbars/
+              - assets/images/snackbars/types/
+              - assets/translations/
+            fonts:
+              - family: Poppins
+                fonts:
+                  - asset: assets/fonts/Poppins/Poppins-Regular.ttf
+                  - asset: assets/fonts/Poppins/Poppins-Bold.ttf
+                    weight: 700
+                  - asset: assets/fonts/Poppins/Poppins-Light.ttf
+                    weight: 300
+              - family: Tajawal
+                fonts:
+                  - asset: assets/fonts/Tajawal/Tajawal-Regular.ttf
+                  - asset: assets/fonts/Tajawal/Tajawal-Bold.ttf
+                    weight: 700
+                  - asset: assets/fonts/Tajawal/Tajawal-Light.ttf
+                    weight: 300
+          EOF
 
       - name: Flutter pub get
+        working-directory: extracted/nettumi_adda_full
         run: |
-          cd ${{ env.PROJECT_ROOT }}
-          flutter clean
+          flutter config --android-sdk $ANDROID_SDK_ROOT
           flutter pub get
 
       - name: Build Signed APK
+        working-directory: extracted/nettumi_adda_full
+        run: flutter build apk --release --build-name=1.0.0 --build-number=1
+
+      - name: Show error detail
+        if: failure()
+        working-directory: extracted/nettumi_adda_full
         run: |
-          cd ${{ env.PROJECT_ROOT }}
-          # বিস্তারিত লগের জন্য verbose ব্যবহার
-          flutter build apk --release --no-shrink --no-tree-shake-icons --verbose
+          flutter build apk --release --verbose 2>&1 | grep -E "error:|FAILED|Exception|Caused by" | tail -50
 
       - name: Upload APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-APK
-          path: ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/*.apk
+          path: extracted/nettumi_adda_full/build/app/outputs/flutter-apk/app-release.apk
