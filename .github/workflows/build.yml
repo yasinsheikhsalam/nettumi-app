@@ -16,40 +16,47 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: 'temurin'
+          java-version: 17
+          distribution: temurin
 
-      - name: Setup Flutter (Latest Stable)
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          # লেটেস্ট এসডিকে ব্যবহার করা হয়েছে যাতে ডার্ট ভার্সন এরর না আসে
-          channel: 'stable'
+          # লেটেস্ট স্টেবল ভার্সন ব্যবহার করা হয়েছে যাতে ডার্ট ভার্সন এরর না আসে
+          channel: stable
 
-      - name: Prepare Files and Keystore
-        run: |
-          unzip -o Nettumi-Adda-Source.zip -d extracted
-          unzip -o nettumi-keystore.zip
-          mv *.keystore nettumi.keystore || true
-          mkdir -p extracted/nettumi_adda_full/android/app/
-          cp nettumi.keystore extracted/nettumi_adda_full/android/app/
+      - name: Install tools
+        run: sudo apt-get install -y unzip
 
-      - name: Configure Keystore
-        run: |
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
+      - name: Unzip Source Code
+        run: unzip -o Nettumi-Adda-Source.zip -d extracted
 
       - name: Auto-Fix Dependencies
         working-directory: extracted/nettumi_adda_full
         run: |
+          # কনফ্লিক্ট করা প্যাকেজগুলো অটো-ফিক্স করার জন্য 'sed' এবং 'upgrade' কমান্ড
+          sed -i 's/intl: \^0.19.0/intl: any/' pubspec.yaml
+          sed -i 's/flutter_lints: \^5.0.0/flutter_lints: any/' pubspec.yaml
+          sed -i 's/custom_lint: \^0.7.3/custom_lint: any/' pubspec.yaml
+          
           flutter clean
-          # সমস্যাযুক্ত প্যাকেজগুলোর ভার্সন অটোমেটিক অ্যাডজাস্ট করার চেষ্টা করবে
+          # জোরপূর্বক ডিপেন্ডেন্সি মেলানোর জন্য 'any' ব্যবহার করা হয়েছে
           flutter pub get
-          flutter pub upgrade --major-versions || echo "Trying to continue despite minor version mismatch..."
 
-      - name: Build Signed APK (Force Mode)
-        working-directory: extracted/nettumi_adda_full
+      - name: Unzip Keystore
         run: |
-          # --no-tree-shake-icons ব্যবহার করা হয়েছে ফন্ট বা আইকন এরর এড়াতে
-          flutter build apk --release --no-shrink --no-tree-shake-icons --build-name=1.0.0 --build-number=1
+          unzip -o nettumi-keystore.zip
+          mv *.keystore nettumi.keystore || true
+          mkdir -p extracted/nettumi_adda_full/android/app/
+          cp nettumi.keystore extracted/nettumi_adda_full/android/app/nettumi.keystore
+
+      - name: Create key.properties
+        run: printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
+
+      - name: Build Signed APK
+        working-directory: extracted/nettumi_adda_full
+        # ছোটখাটো ওয়ার্নিং বা আইকন এরর উপেক্ষা করে বিল্ড করার ফ্ল্যাগ যুক্ত করা হয়েছে
+        run: flutter build apk --release --no-shrink --no-tree-shake-icons --build-name=1.0.0 --build-number=1
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
