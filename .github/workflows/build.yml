@@ -44,19 +44,9 @@ jobs:
           SOURCE_DIR=$(pwd)/extracted/Source
           KEYSTORE_PATH=$SOURCE_DIR/android/app/nettumi.keystore
 
-          # key.properties — NO leading spaces (important!)
-          cat > $SOURCE_DIR/android/key.properties <<EOF
-storePassword=Nettumi@123
-keyPassword=Nettumi@123
-keyAlias=nettumi_alias
-storeFile=$KEYSTORE_PATH
-EOF
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KEYSTORE_PATH" > $SOURCE_DIR/android/key.properties
 
-          # local.properties
-          cat > $SOURCE_DIR/android/local.properties <<EOF
-flutter.sdk=$FLUTTER_SDK_PATH
-sdk.dir=$ANDROID_SDK_ROOT
-EOF
+          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK_PATH" "$ANDROID_SDK_ROOT" > $SOURCE_DIR/android/local.properties
 
           echo "FLUTTER_ROOT=$FLUTTER_SDK_PATH" >> $GITHUB_ENV
           echo "SOURCE_DIR=$SOURCE_DIR" >> $GITHUB_ENV
@@ -102,10 +92,10 @@ EOF
           cat extracted/Source/android/key.properties || echo "NOT FOUND"
           echo "=== Keystore check ==="
           ls -la extracted/Source/android/app/nettumi.keystore || echo "KEYSTORE MISSING"
-          echo "=== pubspec.lock (top 30) ==="
+          echo "=== pubspec.lock top 30 ==="
           head -30 extracted/Source/pubspec.lock || echo "NOT FOUND"
           echo "=== Gradle stacktrace ==="
-          cd extracted/Source/android && ./gradlew assembleRelease --stacktrace --info 2>&1 | tail -200
+          cd extracted/Source/android && ./gradlew assembleRelease --stacktrace 2>&1 | tail -200
 
       - name: Upload APK
         if: success()
@@ -115,7 +105,7 @@ EOF
           path: extracted/Source/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
 
-      - name: Upload APK (on failure fallback check)
+      - name: Upload build logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
