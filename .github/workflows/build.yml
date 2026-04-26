@@ -40,6 +40,59 @@ jobs:
           FLUTTER_BIN=$(which flutter)
           FLUTTER_SDK_PATH=$(dirname $(dirname $FLUTTER_BIN))
 
+          cat > extracted/Source/android/key.properties << EOF
+          storePassword=Nettumi@123
+          keyPassword=Nettumi@123
+          keyAlias=nettumi_alias
+          storeFile=$(pwd)/extracted/Source/android/app/nettumi.keystore
+          EOF
+
+          cat > extracted/Source/android/local.properties << EOF
+          flutter.sdk=$FLUTTER_SDK_PATH
+          sdk.dir=$ANDROID_SDK_ROOT
+          EOF
+
+          echo "FLUTTER_ROOT=$FLUTTER_SDK_PATH" >> $GITHUB_ENV
+
+          echo "=== local.properties ==="
+          cat extracted/Source/android/local.properties
+          echo "=== key.properties ==="
+          cat extracted/Source/android/key.properties
+
+      - name: Flutter pub get
+        working-directory: extracted/Source
+        run: |
+          flutter config --android-sdk $ANDROID_SDK_ROOT
+          flutter pub get
+
+      - name: Accept Android licenses
+        run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      - name: Build Signed APK
+        working-directory: extracted/Source
+        run: flutter build apk --release --build-name=2.0.0 --build-number=2
+
+      - name: Show full Gradle error
+        if: failure()
+        working-directory: extracted/Source/android
+        run: |
+          echo "=== local.properties ==="
+          cat local.properties || echo "NOT FOUND"
+          echo "=== key.properties ==="
+          cat key.properties || echo "NOT FOUND"
+          echo "=== Gradle stacktrace ==="
+          ./gradlew assembleRelease --stacktrace 2>&1 | tail -150
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nettumi-Adda-v2-APK
+          path: extracted/Source/build/app/outputs/flutter-apk/app-release.apk
+      - name: Configure Signing & local.properties
+        run: |
+          FLUTTER_BIN=$(which flutter)
+          FLUTTER_SDK_PATH=$(dirname $(dirname $FLUTTER_BIN))
+
           cat > extracted/nettumi_adda_full/android/key.properties << EOF
           storePassword=Nettumi@123
           keyPassword=Nettumi@123
