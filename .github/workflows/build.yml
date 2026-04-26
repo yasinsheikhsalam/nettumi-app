@@ -19,6 +19,9 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -27,62 +30,39 @@ jobs:
 
       - name: Extract Project
         run: |
+          # জিপ ফাইলটি ঠিকমতো এক্সট্র্যাক্ট করা
           unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
-          find extracted -name "nettumi.keystore" -exec cp {} . \; || true
 
       - name: Configure Signing
         run: |
-          APP_DIR=$(find extracted -name "android" -type d | head -n 1)/app
-          cp nettumi.keystore "$APP_DIR/nettumi.keystore" || echo "Keystore not found"
-          PROPS_PATH=$(find extracted -name "android" -type d | head -n 1)/key.properties
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > "$PROPS_PATH"
+          # ডাইনামিক পাথ ব্যবহার করে কি-স্টোর সেটআপ
+          PROJECT_ROOT=$(find extracted -name "android" -type d | head -n 1)
+          APP_DIR="$PROJECT_ROOT/app"
+          
+          # যদি জিপের ভেতর কি-স্টোর থাকে তবে কপি করা
+          find extracted -name "nettumi.keystore" -exec cp {} "$APP_DIR/nettumi.keystore" \; || true
+          
+          # key.properties তৈরি করা
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > "$PROJECT_ROOT/key.properties"
 
-      - name: Ultimate Auto-Fix Dependencies
+      - name: Flutter Pub Get
         run: |
-          PROJECT_ROOT=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
-          cd "$PROJECT_ROOT"
-          
-          # পাইথন দিয়ে কনফ্লিক্ট করা সব প্যাকেজ ফিক্স করা
-          python3 - << 'PYEOF'
-          import re
-          path = 'pubspec.yaml'
-          with open(path, 'r') as f: content = f.read()
-          
-          # স্ক্রিনশট অনুযায়ী যে প্যাকেজগুলোতে সমস্যা হচ্ছে সেগুলোকে list এ রাখা হলো
-          conflict_pkgs = [
-              'cached_network_image', 'share_plus', 'intl', 
-              'custom_lint', 'riverpod_lint', 'cached_network_image_web'
-          ]
-          
-          for pkg in conflict_pkgs:
-              # প্যাকেজের নির্দিষ্ট ভার্সন সরিয়ে 'any' করে দেওয়া হচ্ছে
-              content = re.sub(f'{pkg}:.*', f'{pkg}: any', content)
-          
-          # dependency_overrides যোগ করা যাতে জোর করে কনফ্লিক্ট মেটানো যায়
-          if 'dependency_overrides:' not in content:
-              content += '\ndependency_overrides:\n'
-          
-          for pkg in conflict_pkgs:
-              if pkg not in content.split('dependency_overrides:')[1]:
-                  content += f'  {pkg}: any\n'
-          
-          with open(path, 'w') as f: f.write(content)
-          print('Conflicts auto-resolved in pubspec.yaml')
-          PYEOF
-          
-          flutter clean
-          # ফোর্সব্যালো আপডেট
-          flutter pub upgrade --major-versions
+          # যেখানে pubspec.yaml আছে সেই ফোল্ডারে যাওয়া
+          PROJECT_DIR=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
+          cd "$PROJECT_DIR"
+          flutter config --android-sdk $ANDROID_SDK_ROOT
           flutter pub get
 
       - name: Build Signed APK
         run: |
-          PROJECT_ROOT=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
-          cd "$PROJECT_ROOT"
-          flutter build apk --release --build-name=1.0.0 --build-number=1 --no-shrink --no-tree-shake-icons
+          PROJECT_DIR=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
+          cd "$PROJECT_DIR"
+          # কোনো কোড ছাড়াই সরাসরি বিল্ড
+          flutter build apk --release --no-shrink --no-tree-shake-icons
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-APK
+          # সাব-ডিরেক্টরি থেকে APK খুঁজে বের করা
           path: extracted/**/build/app/outputs/flutter-apk/*.apk
