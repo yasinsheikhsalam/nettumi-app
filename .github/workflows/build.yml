@@ -19,6 +19,111 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          # আপনার এরর অনুযায়ী স্থিতিশীল ৩.২৪.৫ ভার্সন ব্যবহার করছি
+          flutter-version: '3.24.5'
+          channel: 'stable'
+
+      - name: Smart Extract (All-in-One)
+        run: |
+          # সোর্স কোড আনজিপ
+          unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted || true
+          
+          # কি-স্টোর জিপ খুঁজে আনজিপ করা
+          KEY_ZIP=$(find . -maxdepth 1 -iname "*keystore.zip*" | head -n 1)
+          if [ -n "$KEY_ZIP" ]; then
+            unzip -q "$KEY_ZIP" -d keystore_folder || true
+          fi
+          
+          # প্রোজেক্ট রুট (pubspec.yaml যেখানে আছে) খুঁজে বের করা
+          ROOT=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
+          echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
+          
+          # কি-স্টোর ফাইলের পাথ খুঁজে বের করা
+          K_FILE=$(find . -name "*.keystore" | head -n 1)
+          echo "KEYSTORE_PATH=$K_FILE" >> $GITHUB_ENV
+
+      - name: Repair and Fix Conflicts (Deep Cleaning)
+        run: |
+          cd ${{ env.PROJECT_ROOT }}
+          python3 - << 'PYEOF'
+          import re, os
+          path = 'pubspec.yaml'
+          if os.path.exists(path):
+              with open(path, 'r') as f: lines = f.readlines()
+              
+              # ১. এরর সৃষ্টি করা লাইনগুলো বাদ দেওয়া (যেমন: unexpected characters)
+              fixed_lines = []
+              for line in lines:
+                  if "Unexpected" in line or "·" in line or "\x00" in line: continue
+                  fixed_lines.append(line)
+              
+              content = "".join(fixed_lines)
+              
+              # ২. স্ক্রিনশট অনুযায়ী সমস্যা করা প্যাকেজগুলো any করে দেওয়া
+              pkgs = ['intl', 'share_plus', 'cached_network_image', 'custom_lint', 'riverpod_lint', 'easy_localization']
+              for p in pkgs:
+                  content = re.sub(f'{p}:.*', f'{p}: any', content)
+              
+              # ৩. Dependency Overrides যোগ করে ভার্সন মেলাতে বাধ্য করা
+              if 'dependency_overrides:' not in content:
+                  content += '\ndependency_overrides:\n'
+              for p in pkgs:
+                  if p not in content.split('dependency_overrides:')[1]:
+                      content += f'  {p}: any\n'
+              
+              with open(path, 'w') as f: f.write(content)
+              print("Pubspec Repaired and Cleaned Successfully!")
+          PYEOF
+
+      - name: Configure Signing
+        run: |
+          # অ্যান্ড্রয়েড ফোল্ডার খুঁজে কি-স্টোর সেট করা
+          ANDROID_DIR=$(find ${{ env.PROJECT_ROOT }} -name "android" -type d | head -n 1)
+          mkdir -p "$ANDROID_DIR/app"
+          cp "${{ env.KEYSTORE_PATH }}" "$ANDROID_DIR/app/nettumi.keystore" || true
+          
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > "$ANDROID_DIR/key.properties"
+          printf 'sdk.dir=%s\n' "$ANDROID_SDK_ROOT" > "$ANDROID_DIR/local.properties"
+
+      - name: Force Build Process
+        run: |
+          cd ${{ env.PROJECT_ROOT }}
+          flutter clean
+          # ভার্সন আপডেট এবং ক্যাশ ক্লিয়ার
+          flutter pub upgrade --major-versions
+          flutter pub get
+          # বিল্ড কমান্ড
+          flutter build apk --release --no-shrink --no-tree-shake-icons --verbose
+
+      - name: Upload APK
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nettumi-Adda-AutoFixed-APK
+          path: ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/*.apk: Build Nettumi Adda APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
