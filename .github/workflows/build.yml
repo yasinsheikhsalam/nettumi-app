@@ -18,14 +18,14 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'gradle'
+          # ক্যাশ অপশনটি বাদ দেওয়া হয়েছে কারণ আপনার ফাইলগুলো ZIP এর ভেতর থাকে
+          # যার ফলে শুরুতে Gradle ফাইল খুঁজে না পেয়ে এরর দেয়
 
       - name: Setup Flutter (Fast & Stable)
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.27.1'
           channel: 'stable'
-          cache: true
 
       - name: Extract Project
         run: |
@@ -39,18 +39,14 @@ jobs:
           cp nettumi.keystore extracted/nettumi_adda_full/android/app/nettumi.keystore
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
 
-      - name: Auto-Fix Dependencies & Environment
+      - name: Auto-Fix Dependencies
         working-directory: extracted/nettumi_adda_full
         run: |
-          # যেকোনো ক্যাশ এরর দূর করতে ক্লিন করা
-          flutter clean
-          
-          # পাইথন স্ক্রিপ্ট দিয়ে ভার্সন কনফ্লিক্ট ঠিক করা
           python3 - << 'PYEOF'
           import re
           with open('pubspec.yaml', 'r') as f:
               content = f.read()
-          # প্যাকেজ ভার্সন 'any' করে দেওয়া যাতে অটোমেটিক বেস্ট ভার্সন নেয়
+          # সব সমস্যাযুক্ত প্যাকেজকে any করে দেওয়া হচ্ছে যাতে কনফ্লিক্ট না হয়
           packages = ['intl', 'custom_lint', 'riverpod_lint', 'easy_localization', 'flutter_lints']
           for pkg in packages:
               content = re.sub(f'{pkg}:.*', f'{pkg}: any', content)
@@ -60,21 +56,16 @@ jobs:
           
           with open('pubspec.yaml', 'w') as f:
               f.write(content)
-          print('Pubspec auto-fixed!')
           PYEOF
-          
-          # ডিপেন্ডেন্সি আপডেট এবং ডাউনলোড
-          flutter pub upgrade --major-versions
+          flutter clean
           flutter pub get
 
       - name: Build Signed APK
         working-directory: extracted/nettumi_adda_full
         env:
-          # ফোর্সব্যালো ভাবে অ্যান্ড্রয়েড এসডিকে পাথ সেট করা
+          # এরর এড়াতে এনভায়রনমেন্ট ভেরিয়েবল সেট করা
           ANDROID_HOME: /usr/local/lib/android/sdk
-          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
         run: |
-          # কোনো আইকন বা ফন্ট মিসিং থাকলে যেন বিল্ড না থামে
           flutter build apk --release --no-shrink --no-tree-shake-icons
 
       - name: Upload APK
