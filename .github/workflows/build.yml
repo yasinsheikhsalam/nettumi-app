@@ -1,4 +1,4 @@
-name: Build Nettumi Adda APK (Ultimate Fix)
+name: Build Nettumi Adda APK
 
 on:
   push:
@@ -19,14 +19,13 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Flutter (Pinned Version)
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          # আপনার প্যাকেজগুলোর সাথে সামঞ্জস্য রাখতে ৩.২৪.০ ব্যবহার করা হয়েছে
-          flutter-version: '3.24.0'
+          flutter-version: '3.24.3'
           channel: 'stable'
 
-      - name: Prepare Files
+      - name: Prepare Project Files
         run: |
           unzip -o Nettumi-Adda-Source.zip -d extracted
           unzip -o nettumi-keystore.zip
@@ -34,53 +33,22 @@ jobs:
           mkdir -p extracted/nettumi_adda_full/android/app/
           cp nettumi.keystore extracted/nettumi_adda_full/android/app/
 
-      - name: Create key.properties
+      - name: Configure Keystore Properties
         run: |
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
 
-      - name: Fix Dependencies and Build
+      - name: Flutter Clean and Get
         working-directory: extracted/nettumi_adda_full
         run: |
           flutter clean
-          
-          # 'intl' এরর এড়াতে প্যাকেজগুলোকে জোর করে মেলাবে (Force Resolution)
           flutter pub get
-          
-          # যদি 'intl' কনফ্লিক্ট থাকে তবে তা সমাধানের জন্য এটি কাজ করবে
-          flutter pub upgrade intl easy_localization --major-versions || echo "Trying to continue..."
 
-      - name: Build Signed APK (Ignore Lints & Icons)
+      - name: Build Signed APK
         working-directory: extracted/nettumi_adda_full
         run: |
-          # --no-pub কমান্ডটি ব্যবহার করা হয়েছে যাতে বিল্ডের সময় নতুন করে প্যাকেজ চেক না করে
-          flutter build apk --release --no-shrink --no-tree-shake-icons --no-pub --build-name=1.0.0 --build-number=1
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Nettumi-Adda-APK
-          path: extracted/nettumi_adda_full/build/app/outputs/flutter-apk/app-release.apk        run: |
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
-
-      - name: Auto-Fix Dependencies & Clean Build
-        working-directory: extracted/nettumi_adda_full
-        run: |
-          # ১. পুরনো সব জঞ্জাল পরিষ্কার করা
-          flutter clean
-          
-          # ২. স্মার্টলি প্যাকেজ আপডেট করা (এরর এড়াতে)
-          flutter pub get
-          
-          # ৩. যদি ভার্সন এরর থাকে তবে অটো-আপগ্রেড করার চেষ্টা করবে
-          flutter pub upgrade --major-versions || echo "Already up to date"
-
-      - name: Build Signed APK (Error Bypass Mode)
-        working-directory: extracted/nettumi_adda_full
-        run: |
-          # --no-tree-shake-icons এবং অন্যান্য ফ্ল্যাগ ছোটখাটো এরর এড়িয়ে বিল্ড সফল করে
           flutter build apk --release --no-shrink --no-tree-shake-icons --build-name=1.0.0 --build-number=1
 
-      - name: Upload Finished APK
+      - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-APK
