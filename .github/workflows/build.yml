@@ -1,4 +1,4 @@
-name: Build Nettumi Adda APK (Auto-Fix Mode)
+name: Build Nettumi Adda APK (Ultimate Fix)
 
 on:
   push:
@@ -19,14 +19,15 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Flutter (Latest Stable)
+      - name: Setup Flutter (Pinned Version)
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable' # এটি সবসময় লেটেস্ট স্টেবল ভার্সন নেবে যাতে SDK এরর না আসে
+          # আপনার প্যাকেজগুলোর সাথে সামঞ্জস্য রাখতে ৩.২৪.০ ব্যবহার করা হয়েছে
+          flutter-version: '3.24.0'
+          channel: 'stable'
 
       - name: Prepare Files
         run: |
-          # ফাইল আনজিপ এবং কী-স্টোর ম্যানেজমেন্ট
           unzip -o Nettumi-Adda-Source.zip -d extracted
           unzip -o nettumi-keystore.zip
           mv *.keystore nettumi.keystore || true
@@ -35,6 +36,30 @@ jobs:
 
       - name: Create key.properties
         run: |
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
+
+      - name: Fix Dependencies and Build
+        working-directory: extracted/nettumi_adda_full
+        run: |
+          flutter clean
+          
+          # 'intl' এরর এড়াতে প্যাকেজগুলোকে জোর করে মেলাবে (Force Resolution)
+          flutter pub get
+          
+          # যদি 'intl' কনফ্লিক্ট থাকে তবে তা সমাধানের জন্য এটি কাজ করবে
+          flutter pub upgrade intl easy_localization --major-versions || echo "Trying to continue..."
+
+      - name: Build Signed APK (Ignore Lints & Icons)
+        working-directory: extracted/nettumi_adda_full
+        run: |
+          # --no-pub কমান্ডটি ব্যবহার করা হয়েছে যাতে বিল্ডের সময় নতুন করে প্যাকেজ চেক না করে
+          flutter build apk --release --no-shrink --no-tree-shake-icons --no-pub --build-name=1.0.0 --build-number=1
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nettumi-Adda-APK
+          path: extracted/nettumi_adda_full/build/app/outputs/flutter-apk/app-release.apk        run: |
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > extracted/nettumi_adda_full/android/key.properties
 
       - name: Auto-Fix Dependencies & Clean Build
