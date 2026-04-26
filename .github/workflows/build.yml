@@ -19,42 +19,76 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
       - name: Setup Flutter 3.24.5
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.5'
           channel: 'stable'
 
-      - name: Extract Project
+      - name: Extract Project & Keystore
         run: |
+          # সোর্স কোড এবং কি-স্টোর আনজিপ করা
           unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
-          # প্রজেক্ট রুট খুঁজে বের করা যদি ফোল্ডার স্ট্রাকচার ভিন্ন হয়
-          PROJECT_PATH=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
-          echo "PROJECT_PATH=$PROJECT_PATH" >> $GITHUB_ENV
+          unzip -q Nettumi-keystore.zip -d keystore_folder
+          
+          # প্রোজেক্ট রুট খুঁজে বের করা
+          ROOT=$(find extracted -name "pubspec.yaml" -exec dirname {} \;)
+          echo "PROJECT_ROOT=$ROOT" >> $GITHUB_ENV
+          
+          # কি-স্টোর ফাইল খুঁজে বের করা
+          KEYSTORE_FILE=$(find keystore_folder -name "*.keystore" | head -n 1)
+          echo "KEYSTORE_PATH=$KEYSTORE_FILE" >> $GITHUB_ENV
+
+      - name: Ultimate Dependency Auto-Fix
+        run: |
+          cd ${{ env.PROJECT_ROOT }}
+          python3 - << 'PYEOF'
+          import re, os
+          path = 'pubspec.yaml'
+          if os.path.exists(path):
+              with open(path, 'r') as f: content = f.read()
+              # কনফ্লিক্ট করা প্যাকেজগুলোকে any করে দেওয়া
+              pkgs = ['intl', 'custom_lint', 'riverpod_lint', 'share_plus', 'cached_network_image']
+              for p in pkgs:
+                  content = re.sub(f'{p}:.*', f'{p}: any', content)
+              
+              if 'dependency_overrides:' not in content:
+                  content += '\ndependency_overrides:\n'
+              for p in pkgs:
+                  if p not in content.split('dependency_overrides:')[1]:
+                      content += f'  {p}: any\n'
+              
+              with open(path, 'w') as f: f.write(content)
+          PYEOF
 
       - name: Configure Signing
         run: |
-          # কি-স্টোর ফাইলটি সঠিক জায়গায় কপি করা
-          find extracted -name "nettumi.keystore" -exec cp {} $PROJECT_PATH/android/app/ \; || true
+          # অ্যান্ড্রয়েড অ্যাপ ডিরেক্টরিতে কি-স্টোর কপি করা
+          mkdir -p ${{ env.PROJECT_ROOT }}/android/app
+          cp "${{ env.KEYSTORE_PATH }}" "${{ env.PROJECT_ROOT }}/android/app/nettumi.keystore"
           
           # key.properties তৈরি করা
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' \
-            > $PROJECT_PATH/android/key.properties
+            > ${{ env.PROJECT_ROOT }}/android/key.properties
 
       - name: Flutter pub get
-        working-directory: ${{ env.PROJECT_PATH }}
         run: |
+          cd ${{ env.PROJECT_ROOT }}
           flutter clean
           flutter pub get
 
       - name: Build Signed APK
-        working-directory: ${{ env.PROJECT_PATH }}
         run: |
-          # বিল্ড আরও ডিটেইল ভাবে দেখার জন্য --verbose ফ্ল্যাগ যোগ করা হয়েছে
+          cd ${{ env.PROJECT_ROOT }}
+          # বিস্তারিত লগ দেখার জন্য verbose ব্যবহার
           flutter build apk --release --no-shrink --no-tree-shake-icons --verbose
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-APK
-          path: ${{ env.PROJECT_PATH }}/build/app/outputs/flutter-apk/*.apk
+          path: ${{ env.PROJECT_ROOT }}/build/app/outputs/flutter-apk/*.apk
