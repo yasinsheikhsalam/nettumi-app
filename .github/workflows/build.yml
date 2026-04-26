@@ -35,11 +35,16 @@ jobs:
       - name: Extract Project
         run: unzip -q Nettumi-Adda-Source-Fixed.zip -d extracted
 
-      - name: Configure Signing
+      - name: Configure Signing & local.properties
         run: |
           cp extracted/nettumi_adda_full/android/app/nettumi.keystore ./nettumi.keystore
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' \
             > extracted/nettumi_adda_full/android/key.properties
+          FLUTTER_SDK=$(which flutter | sed 's|/bin/flutter||')
+          echo "flutter.sdk=$FLUTTER_SDK" > extracted/nettumi_adda_full/android/local.properties
+          echo "sdk.dir=$ANDROID_SDK_ROOT" >> extracted/nettumi_adda_full/android/local.properties
+          echo "FLUTTER_ROOT=$FLUTTER_SDK" >> $GITHUB_ENV
+          echo "Flutter SDK: $FLUTTER_SDK"
 
       - name: Write correct pubspec.yaml
         run: |
@@ -120,14 +125,6 @@ jobs:
                   - asset: assets/fonts/Tajawal/Tajawal-Light.ttf
                     weight: 300
           EOF
-
-      - name: Create local.properties
-        run: |
-          FLUTTER_SDK=$(which flutter | sed 's|/bin/flutter||')
-          echo "flutter.sdk=$FLUTTER_SDK" > extracted/nettumi_adda_full/android/local.properties
-          echo "sdk.dir=$ANDROID_SDK_ROOT" >> extracted/nettumi_adda_full/android/local.properties
-          echo "flutter.buildMode=release" >> extracted/nettumi_adda_full/android/local.properties
-          cat extracted/nettumi_adda_full/android/local.properties
 
       - name: Flutter pub get
         working-directory: extracted/nettumi_adda_full
