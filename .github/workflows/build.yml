@@ -49,6 +49,269 @@ jobs:
           FLUTTER_SDK=$(dirname $(dirname $(which flutter)))
           SRC=$GITHUB_WORKSPACE/extracted/SourceFixed
           KS_PATH=$SRC/android/app/nettumi.keystore
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KS_PATH" > $SRC/android/key.properties
+          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK" "$ANDROID_SDK_ROOT" > $SRC/android/local.properties
+          chmod +x $SRC/android/gradlew
+          echo "local.properties:"; cat $SRC/android/local.properties
+          echo "key.properties:"; cat $SRC/android/key.properties
+
+      - name: Fix pubspec & pub get
+        run: |
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed
+          sed -i 's/flutter_svg:.*/flutter_svg: ^2.0.10+1/' pubspec.yaml
+          sed -i 's/url_launcher:.*/url_launcher: ^6.2.5/' pubspec.yaml
+          sed -i 's/share_plus:.*/share_plus: ^10.1.0/' pubspec.yaml
+          sed -i 's/flutter_lints:.*/flutter_lints: ^3.0.0/' pubspec.yaml
+          sed -i '/dependency_overrides:/,/^[^ ]/{s/collection:.*/collection: ^1.19.0/}' pubspec.yaml
+          sed -i '/dependency_overrides:/,/^[^ ]/{s/intl:.*/intl: ^0.20.0/}' pubspec.yaml
+          rm -f pubspec.lock
+          flutter config --android-sdk $ANDROID_SDK_ROOT
+          flutter pub get
+
+      - name: Accept Android licenses
+        run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      # ══════════════════════════════════════════════════════════════════
+      #  AUTO-FIX ENGINE — pub-cache সব প্যাকেজ একসাথে ঠিক করে
+      # ══════════════════════════════════════════════════════════════════
+      - name: AUTO-FIX ENGINE — All pub-cache packages
+        run: |
+          PUB_CACHE="$HOME/.pub-cache/hosted/pub.dev"
+          echo "════════════════════════════════════════════"
+          echo "  AUTO-FIX ENGINE STARTED"
+          echo "════════════════════════════════════════════"
+
+          find "$PUB_CACHE" -name "build.gradle" -path "*/android/build.gradle" | while read BG; do
+            PKG=$(echo "$BG" | sed "s|$PUB_CACHE/||" | cut -d'/' -f1)
+            echo ""
+            echo "── Fixing: $PKG ──"
+
+            # FIX 1: namespace missing
+            if ! grep -q "namespace" "$BG"; then
+              MANIFEST=$(dirname "$BG")/src/main/AndroidManifest.xml
+              NS=$(grep -o 'package="[^"]*"' "$MANIFEST" 2>/dev/null | head -1 | sed 's/package="//;s/"//')
+              if [ -n "$NS" ]; then
+                sed -i "/^android {/a\\    namespace '${NS}'" "$BG"
+                echo "  [FIX 1] namespace added: $NS"
+              fi
+            else
+              echo "  [OK] namespace present"
+            fi
+
+            # FIX 2: JavaVersion পুরনো → 17
+            sed -i 's/JavaVersion\.VERSION_1_8/JavaVersion.VERSION_17/g' "$BG" 2>/dev/null || true
+            sed -i 's/JavaVersion\.VERSION_11/JavaVersion.VERSION_17/g'  "$BG" 2>/dev/null || true
+            sed -i 's/JavaVersion\.VERSION_1_7/JavaVersion.VERSION_17/g' "$BG" 2>/dev/null || true
+            echo "  [FIX 2] JavaVersion → 17"
+
+            # FIX 3: jvmTarget পুরনো → 17
+            if grep -q "jvmTarget" "$BG"; then
+              sed -i "s/jvmTarget = '[^']*'/jvmTarget = '17'/g" "$BG" 2>/dev/null || true
+              sed -i 's/jvmTarget = "[^"]*"/jvmTarget = "17"/g'  "$BG" 2>/dev/null || true
+              echo "  [FIX 3] jvmTarget → 17"
+            else
+              # kotlinOptions block inject
+              if grep -q "^android {" "$BG"; then
+                sed -i "/^android {/a\\    kotlinOptions { jvmTarget = '17' }" "$BG" 2>/dev/null || true
+                echo "  [FIX 3] kotlinOptions injected with jvmTarget=17"
+              fi
+            fi
+
+            # FIX 4: compileOptions missing → inject
+            if ! grep -q "compileOptions" "$BG"; then
+              sed -i "/^android {/a\\    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }" "$BG" 2>/dev/null || true
+              echo "  [FIX 4] compileOptions injected"
+            else
+              sed -i 's/sourceCompatibility JavaVersion\.[A-Z_0-9]*/sourceCompatibility JavaVersion.VERSION_17/g' "$BG" 2>/dev/null || true
+              sed -i 's/targetCompatibility JavaVersion\.[A-Z_0-9]*/targetCompatibility JavaVersion.VERSION_17/g' "$BG" 2>/dev/null || true
+              echo "  [FIX 4] compileOptions updated → VERSION_17"
+            fi
+
+            # FIX 5: compileSdkVersion পুরনো → 34
+            if grep -qE "compileSdkVersion [0-9]+" "$BG"; then
+              CSDK=$(grep -oE "compileSdkVersion [0-9]+" "$BG" | awk '{print $2}' | head -1)
+              if [ "$CSDK" -lt 33 ] 2>/dev/null; then
+                sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 34/g' "$BG" 2>/dev/null || true
+                sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 34/g'   "$BG" 2>/dev/null || true
+                echo "  [FIX 5] compileSdk/targetSdk → 34"
+              fi
+            fi
+
+            # FIX 6: minSdkVersion খুব কম → 21
+            if grep -qE "minSdkVersion [0-9]+" "$BG"; then
+              MSDK=$(grep -oE "minSdkVersion [0-9]+" "$BG" | awk '{print $2}' | head -1)
+              if [ "$MSDK" -lt 21 ] 2>/dev/null; then
+                sed -i 's/minSdkVersion [0-9]*/minSdkVersion 21/g' "$BG" 2>/dev/null || true
+                echo "  [FIX 6] minSdkVersion → 21"
+              fi
+            fi
+
+          done
+
+          echo ""
+          echo "════════════════════════════════════════════"
+          echo "  AUTO-FIX ENGINE DONE"
+          echo "════════════════════════════════════════════"
+
+      # ══════════════════════════════════════════════════════════════════
+      #  PROJECT & APP GRADLE FIX
+      # ══════════════════════════════════════════════════════════════════
+      - name: AUTO-FIX ENGINE — Project Gradle files
+        run: |
+          SRC=$GITHUB_WORKSPACE/extracted/SourceFixed/android
+          echo "════ Project Gradle Fix ════"
+
+          if [ -f "$SRC/build.gradle" ]; then
+            sed -i "s/ext.kotlin_version = '[^']*'/ext.kotlin_version = '1.9.24'/" "$SRC/build.gradle" || true
+            sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.3.0/" "$SRC/build.gradle" || true
+            echo "[FIX] android/build.gradle — kotlin+AGP updated"
+          fi
+
+          if [ -f "$SRC/app/build.gradle" ]; then
+            sed -i 's/JavaVersion\.VERSION_1_8/JavaVersion.VERSION_17/g' "$SRC/app/build.gradle" || true
+            sed -i 's/JavaVersion\.VERSION_11/JavaVersion.VERSION_17/g'  "$SRC/app/build.gradle" || true
+            sed -i "s/jvmTarget = '[^']*'/jvmTarget = '17'/g"            "$SRC/app/build.gradle" || true
+            sed -i 's/jvmTarget = "[^"]*"/jvmTarget = "17"/g'            "$SRC/app/build.gradle" || true
+            echo "[FIX] app/build.gradle — JVM updated"
+          fi
+
+      # ══════════════════════════════════════════════════════════════════
+      #  BUILD APK — 3-attempt retry engine
+      # ══════════════════════════════════════════════════════════════════
+      - name: Build APK — Auto-Retry Engine
+        run: |
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed
+          find lib -name "*.dart" -exec sed -i 's/context\.router\.pop()/context.maybePop()/g' {} \; 2>/dev/null || true
+
+          run_build() {
+            flutter build apk --release \
+              --build-name=2.0.0 \
+              --build-number=2 \
+              --android-skip-build-dependency-validation 2>&1 | tee "$1"
+            return ${PIPESTATUS[0]}
+          }
+
+          fix_jvm_all() {
+            PUB_CACHE="$HOME/.pub-cache/hosted/pub.dev"
+            find "$PUB_CACHE" -name "build.gradle" -path "*/android/build.gradle" | while read BG; do
+              sed -i 's/JavaVersion\.VERSION_1_8/JavaVersion.VERSION_17/g' "$BG" 2>/dev/null || true
+              sed -i 's/JavaVersion\.VERSION_11/JavaVersion.VERSION_17/g'  "$BG" 2>/dev/null || true
+              sed -i "s/jvmTarget = '[^']*'/jvmTarget = '17'/g"            "$BG" 2>/dev/null || true
+              sed -i 's/jvmTarget = "[^"]*"/jvmTarget = "17"/g'            "$BG" 2>/dev/null || true
+              if ! grep -q "compileOptions" "$BG"; then
+                sed -i "/^android {/a\\    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }" "$BG" 2>/dev/null || true
+              else
+                sed -i 's/sourceCompatibility JavaVersion\.[A-Z_0-9]*/sourceCompatibility JavaVersion.VERSION_17/g' "$BG" 2>/dev/null || true
+                sed -i 's/targetCompatibility JavaVersion\.[A-Z_0-9]*/targetCompatibility JavaVersion.VERSION_17/g' "$BG" 2>/dev/null || true
+              fi
+            done
+          }
+
+          # ── ATTEMPT 1 ────────────────────────────────────────────────
+          echo "════ ATTEMPT 1 ════"
+          if run_build /tmp/build1.log; then
+            echo "✅ ATTEMPT 1 SUCCESS"
+          else
+            echo "❌ ATTEMPT 1 FAILED → applying JVM fix + retry"
+            fix_jvm_all
+
+            # ── ATTEMPT 2 ──────────────────────────────────────────────
+            echo "════ ATTEMPT 2 ════"
+            if run_build /tmp/build2.log; then
+              echo "✅ ATTEMPT 2 SUCCESS"
+            else
+              echo "❌ ATTEMPT 2 FAILED → flutter clean + pub upgrade + retry"
+              flutter clean 2>/dev/null || true
+              flutter pub upgrade --major-versions 2>/dev/null || true
+              flutter pub get 2>/dev/null || true
+              fix_jvm_all
+
+              # ── ATTEMPT 3 ────────────────────────────────────────────
+              echo "════ ATTEMPT 3 ════"
+              if run_build /tmp/build3.log; then
+                echo "✅ ATTEMPT 3 SUCCESS"
+              else
+                echo "❌ ALL 3 ATTEMPTS FAILED"
+                echo "=== Last 60 lines of build log ==="
+                tail -60 /tmp/build3.log || tail -60 /tmp/build2.log || tail -60 /tmp/build1.log
+                exit 1
+              fi
+            fi
+          fi
+
+          # APK copy
+          APK_PATH="$GITHUB_WORKSPACE/extracted/SourceFixed/build/app/outputs/flutter-apk/app-release.apk"
+          ls -la "$(dirname $APK_PATH)/"
+          cp "$APK_PATH" "$GITHUB_WORKSPACE/Nettumi-Adda-v2.apk"
+          echo "✅ APK ready:" && ls -lh "$GITHUB_WORKSPACE/Nettumi-Adda-v2.apk"
+
+      # ══════════════════════════════════════════════════════════════════
+      #  UPLOAD APK
+      # ══════════════════════════════════════════════════════════════════
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nettumi-Adda-v2-Release
+          path: Nettumi-Adda-v2.apk
+          if-no-files-found: error
+
+      # ══════════════════════════════════════════════════════════════════
+      #  FULL DIAGNOSIS — যেকোনো step fail হলে চলবে
+      # ══════════════════════════════════════════════════════════════════
+      - name: Full Diagnosis on any failure
+        if: failure()
+        run: |
+          echo "════════════════════════════════════════════"
+          echo "   FULL DIAGNOSIS ENGINE"
+          echo "════════════════════════════════════════════"
+
+          echo "=== Build logs ==="
+          for LOG in /tmp/build1.log /tmp/build2.log /tmp/build3.log; do
+            [ -f "$LOG" ] && echo "--- $LOG (last 30 lines) ---" && tail -30 "$LOG" || true
+          done
+
+          echo "=== pubspec.yaml ==="
+          cat $GITHUB_WORKSPACE/extracted/SourceFixed/pubspec.yaml 2>/dev/null || true
+
+          echo "=== Packages missing namespace ==="
+          find "$HOME/.pub-cache" -name "build.gradle" -path "*/android/build.gradle" | while read BG; do
+            grep -q "namespace" "$BG" || echo "MISSING NAMESPACE: $BG"
+          done || true
+
+          echo "=== Packages with old JavaVersion ==="
+          find "$HOME/.pub-cache" -name "build.gradle" -path "*/android/build.gradle" | while read BG; do
+            grep -qE "VERSION_1_8|VERSION_11|VERSION_1_7" "$BG" && echo "OLD JVM: $BG"
+          done || true
+
+          echo "=== Flutter doctor ==="
+          flutter doctor -v || true
+
+          echo "=== Gradle stacktrace ==="
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed/android 2>/dev/null && \
+            ./gradlew assembleRelease --stacktrace 2>&1 | grep -E "FAILURE|Caused by:|error:|> Task" | head -50 || true
+          channel: 'stable'
+          cache: true
+
+      - name: Extract Project
+        run: |
+          sudo apt-get install -y unzip
+          unzip -q Nettumi-Adda-Source-Fixed-v11.zip -d extracted
+          echo "=== Extracted ==="
+          ls extracted/SourceFixed/
+
+      - name: Extract Keystore
+        run: |
+          unzip -q nettumi-keystore.zip -d keystore_out
+          KEYSTORE_SRC=$(find keystore_out -type f \( -name "*.keystore" -o -name "*.jks" \) | head -1)
+          echo "Keystore: $KEYSTORE_SRC"
+          cp "$KEYSTORE_SRC" extracted/SourceFixed/android/app/nettumi.keystore
+          ls -la extracted/SourceFixed/android/app/nettumi.keystore
+
+      - name: Configure signing & properties
+        run: |
+          FLUTTER_SDK=$(dirname $(dirname $(which flutter)))
+          SRC=$GITHUB_WORKSPACE/extracted/SourceFixed
+          KS_PATH=$SRC/android/app/nettumi.keystore
 
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KS_PATH" > $SRC/android/key.properties
           printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK" "$ANDROID_SDK_ROOT" > $SRC/android/local.properties
