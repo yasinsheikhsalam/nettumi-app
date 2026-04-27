@@ -22,48 +22,48 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Flutter
+      - name: Setup Flutter (Latest Stable)
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
 
-      - name: Extract Project (Smart Detect)
+      - name: Extract Project (Dynamic Detection)
         run: |
-          # রিপোজিটরিতে থাকা যেকোনো .zip ফাইল (keystore বাদে) খুঁজে বের করে আনজিপ করা
+          sudo apt-get install -y unzip
+          # রিপোজিটরিতে থাকা যেকোনো .zip ফাইল (keystore বাদে) খুঁজে বের করা
           SOURCE_ZIP=$(ls *.zip | grep -v "keystore" | head -n 1)
-          if [ -z "$SOURCE_ZIP" ]; then echo "Error: No source ZIP found in repo!"; exit 1; fi
+          if [ -z "$SOURCE_ZIP" ]; then echo "Error: No ZIP file found!"; exit 1; fi
           unzip -q "$SOURCE_ZIP" -d extracted
           
-          # pubspec.yaml যেখানে আছে সেই ফোল্ডারটি খুঁজে বের করা
+          # pubspec.yaml এর পাথ ডাইনামিকভাবে খুঁজে বের করা
           REAL_SOURCE=$(find $(pwd)/extracted -name "pubspec.yaml" -exec dirname {} \;)
           echo "SOURCE_PATH=$REAL_SOURCE" >> $GITHUB_ENV
-          echo "Source found at: $REAL_SOURCE"
+          echo "Project extracted to: $REAL_SOURCE"
 
       - name: Extract Keystore
         run: |
-          KEYSTORE_ZIP=$(ls *keystore*.zip | head -n 1)
-          if [ ! -z "$KEYSTORE_ZIP" ]; then
-            unzip -q "$KEYSTORE_ZIP" -d keystore_temp
+          if [ -f "nettumi-keystore.zip" ]; then
+            unzip -q nettumi-keystore.zip -d keystore_temp
             mkdir -p ${{ env.SOURCE_PATH }}/android/app/
             find keystore_temp -name "*.keystore" -o -name "*.jks" -exec cp {} ${{ env.SOURCE_PATH }}/android/app/nettumi.keystore \;
           fi
 
       - name: Configure Signing & Environment
         run: |
-          FLUTTER_BIN=$(which flutter)
-          FLUTTER_SDK_PATH=$(dirname $(dirname $FLUTTER_BIN))
+          FLUTTER_SDK_PATH=$(dirname $(dirname $(which flutter)))
           CONF_DIR=${{ env.SOURCE_PATH }}/android
           
-          # signing properties এবং local.properties তৈরি
+          # key.properties এবং local.properties তৈরি
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > $CONF_DIR/key.properties
           printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK_PATH" "$ANDROID_SDK_ROOT" > $CONF_DIR/local.properties
           chmod +x $CONF_DIR/gradlew
 
-      - name: Flutter Build (Skip Validation)
+      - name: Flutter Dependencies & Build
         working-directory: ${{ env.SOURCE_PATH }}
         run: |
-          flutter pub get || flutter pub upgrade
+          flutter pub get
+          # Gradle ভার্সন বা ডিপেন্ডেন্সি জনিত এরর এড়াতে ভ্যালিডেশন স্কিপ ফ্ল্যাগ
           flutter build apk --release --build-name=2.0.0 --build-number=2 --no-shrink --android-skip-build-dependency-validation
 
       - name: Upload APK
@@ -76,6 +76,6 @@ jobs:
       - name: Debug on Failure
         if: failure()
         run: |
-          echo "=== Error Location Analysis ==="
+          echo "=== Error Analysis ==="
           ls -R extracted/ || echo "Extraction failed"
           cd ${{ env.SOURCE_PATH }}/android && ./gradlew assembleRelease --stacktrace 2>&1 | tail -200
