@@ -43,32 +43,34 @@ jobs:
           import os, re, glob
 
           def solve_gradle_issues(file_path):
-              if not os.path.exists(file_path): return
-              with open(file_path, 'r', errors='ignore') as f:
-                  content = f.read()
-              
-              # ১. ভার্সন ফিক্স (৩/৩৪ রুল)
-              content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', content)
-              content = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', content)
-              content = re.sub(r'compileSdk\s+\d+', 'compileSdk 34', content)
-              
-              # ২. জাভা ১৭ এনফোর্সমেন্ট
-              content = re.sub(r'JavaVersion\.VERSION_1_[78]', 'JavaVersion.VERSION_17', content)
-              content = re.sub(r'JavaVersion\.VERSION_11', 'JavaVersion.VERSION_17', content)
-              
-              # ৩. অডিও সেশন এরর ফিক্স (AndroidX Media missing)
-              if 'dependencies {' in content and 'androidx.media' not in content:
-                  content = content.replace('dependencies {', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', 1)
-              
-              # ৪. অটো নেমস্পেস ইনজেকশন
-              if 'android {' in content and 'namespace' not in content:
-                  manifest = os.path.join(os.path.dirname(file_path), 'src', 'main', 'AndroidManifest.xml')
-                  if os.path.exists(manifest):
-                      with open(manifest, 'r') as m:
-                          pkg = re.search(r'package="([^"]+)"', m.read())
-                          if pkg: content = content.replace('android {', f'android {{\n    namespace "{pkg.group(1)}"', 1)
+              if not os.path.exists(file_path) or os.path.isdir(file_path): return
+              try:
+                  with open(file_path, 'r', errors='ignore') as f:
+                      content = f.read()
+                  
+                  # ১. ভার্সন ফিক্স (৩/৩৪ রুল)
+                  content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', content)
+                  content = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', content)
+                  content = re.sub(r'compileSdk\s+\d+', 'compileSdk 34', content)
+                  
+                  # ২. জাভা ১৭ এনফোর্সমেন্ট
+                  content = re.sub(r'JavaVersion\.VERSION_1_[78]', 'JavaVersion.VERSION_17', content)
+                  content = re.sub(r'JavaVersion\.VERSION_11', 'JavaVersion.VERSION_17', content)
+                  
+                  # ৩. অডিও সেশন এরর ফিক্স
+                  if 'dependencies {' in content and 'androidx.media' not in content:
+                      content = content.replace('dependencies {', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', 1)
+                  
+                  # ৪. অটো নেমস্পেস ইনজেকশন
+                  if 'android {' in content and 'namespace' not in content:
+                      manifest = os.path.join(os.path.dirname(file_path), 'src', 'main', 'AndroidManifest.xml')
+                      if os.path.exists(manifest):
+                          with open(manifest, 'r') as m:
+                              pkg = re.search(r'package="([^"]+)"', m.read())
+                              if pkg: content = content.replace('android {', f'android {{\n    namespace "{pkg.group(1)}"', 1)
 
-              with open(file_path, 'w') as f: f.write(content)
+                  with open(file_path, 'w') as f: f.write(content)
+              except: pass
 
           for root in ['./extracted', os.path.expanduser('~/.pub-cache')]:
               for bg in glob.glob(f"{root}/**/build.gradle", recursive=True):
@@ -80,37 +82,36 @@ jobs:
           cd extracted/SourceFixed
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
           
-          # বিল্ড লুপ (৫ বার চেষ্টা করবে বিভিন্ন পদ্ধতিতে)
           for i in {1..5}; do
             echo "════════════════════════════════════════════"
             echo "  AUTONOMOUS FIX ATTEMPT: $i"
             echo "════════════════════════════════════════════"
             
-            # প্রতিবার বিল্ডের আগে অটো-ফিক্স ইঞ্জিন রান করবে
+            # প্রি-বিল্ড ফিক্স
             python3 /tmp/heal_engine.py
-            
-            # প্রোপার্টিজ ফাইল ঠিক করা
             printf "android.useAndroidX=true\nandroid.enableJetifier=true\n" > android/gradle.properties
             
-            # বিল্ড কমান্ড
+            # বিল্ড ট্রাই (উইথ অটো-ডিপেন্ডেন্সি ফিক্স)
             if flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation; then
               echo "BUILD SUCCESSFUL!"
               cp build/app/outputs/flutter-apk/app-release.apk $GITHUB_WORKSPACE/Nettumi-Build-Completed.apk
               exit 0
             fi
             
-            # যদি ফেইল হয়, তবে একা একা ফিক্স করার লেভেল বাড়বে
-            echo "Attempt $i failed. Cleaning and Re-patching..."
+            echo "Attempt $i failed. Applying deeper fixes..."
             flutter clean
-            flutter pub get || (rm -f pubspec.lock && flutter pub get)
             
-            if [ $i -eq 3 ]; then
-               echo "Level 3: Repairing Android Folder Assets..."
-               find android -name "*.gradle" -exec sed -i 's/8.0/8.3/g' {} +
+            # লেভেল ৩: ডিপেন্ডেন্সি রেজোলিউশন ফিক্স
+            if [ $i -ge 2 ]; then
+               rm -f pubspec.lock
+               flutter pub get --allow-fallback
+            fi
+
+            # লেভেল ৪: গ্র্যাডল ফাইল মেরামত (নিরাপদভাবে)
+            if [ $i -ge 3 ]; then
+               find android -maxdepth 2 -name "*.gradle" -type f -exec sed -i 's/8.0/8.3/g' {} +
             fi
           done
-          
-          echo "Could not auto-solve all issues."
           exit 1
 
       - name: Upload Success Artifact
@@ -119,11 +120,3 @@ jobs:
         with:
           name: Nettumi-Adda-Final-APK
           path: Nettumi-Build-Completed.apk
-
-      - name: Post-Failure Analysis
-        if: failure()
-        run: |
-          echo "Auto-Diagnosis initiated..."
-          cd extracted/SourceFixed
-          flutter doctor -v
-          cat android/app/build.gradle | grep "namespace" || echo "No namespace found"
