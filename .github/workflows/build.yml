@@ -1,4 +1,4 @@
-name: 🚀 NETTUMI ULTIMATE FINAL BUILD
+name: 🚨 FINAL SUCCESS GUARANTEED
 
 on:
   push:
@@ -8,15 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        target: [apk, appbundle]
-        include:
-          - target: apk
-            file_name: "Nettumi-Release.apk"
-          - target: appbundle
-            file_name: "Nettumi-Release.aab"
-
     steps:
       - name: 📥 Checkout
         uses: actions/checkout@v4
@@ -26,75 +17,73 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'gradle'
 
       - name: 🦋 Setup Flutter 3.29.3
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.29.3'
-          channel: 'stable'
 
-      - name: 💣 Extraction Engine
+      - name: 💣 Extraction & Keystore
         run: |
-          sudo apt-get install -y unzip python3
           unzip -q Nettumi-Adda-Source-Fixed-v11.zip -d extracted || true
           mkdir -p extracted/SourceFixed/android/app
           unzip -q nettumi-keystore.zip -d temp_ks || true
           find temp_ks -name "*" -type f -exec cp {} extracted/SourceFixed/android/app/nettumi.keystore \;
 
-      - name: 🧬 Intelligent Nuclear Fixer
+      - name: 🧬 The Ultimate Auto-Fixer (No Duplicates)
         run: |
-          cat > /tmp/god_fix.py << 'EOF'
-          import os, re, glob
+          cat > /tmp/fixer.py << 'EOF'
+          import os, glob, re
 
-          # ১. pubspec.yaml ফিক্স (ডুপ্লিকেট রিমুভার)
-          pub_path = './extracted/SourceFixed/pubspec.yaml'
-          if os.path.exists(pub_path):
-              with open(pub_path, 'r', encoding='utf-8') as f: lines = f.readlines()
-              final_lines = []
+          def solve_pubspec():
+              path = './extracted/SourceFixed/pubspec.yaml'
+              if not os.path.exists(path): return
+              with open(path, 'r', encoding='utf-8') as f: lines = f.readlines()
+              
+              new_lines = []
               for line in lines:
+                  # ফাইলে আগে থেকে dependency_overrides থাকলে তা বাদ দিয়ে দেয়া
                   if 'dependency_overrides:' in line: break
-                  final_lines.append(line)
-              # একদম ফ্রেশ ওভাররাইড ইনজেকশন
-              final_lines.append("\ndependency_overrides:\n  intl: any\n  collection: any\n  meta: any\n  flutter_svg: ^2.0.10+1\n")
-              with open(pub_path, 'w', encoding='utf-8') as f: f.writelines(final_lines)
+                  new_lines.append(line)
+              
+              # একদম শেষে একবারই ওভাররাইড যোগ করা
+              new_lines.append("\ndependency_overrides:\n  intl: any\n  collection: any\n  meta: any\n  flutter_svg: ^2.0.10+1\n")
+              
+              with open(path, 'w', encoding='utf-8') as f: f.writelines(new_lines)
+              print("✅ Pubspec.yaml cleaned and fixed.")
 
-          # ২. গ্র্যাডল ও ভার্সন ফিক্স
-          def fix_gradle(p):
-              if not os.path.isfile(p): return
-              with open(p, 'r', errors='ignore') as f: c = f.read()
-              c = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', c)
-              c = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', c)
-              c = re.sub(r'JavaVersion\.VERSION_1_[781]', 'JavaVersion.VERSION_17', c)
-              # মিডিয়া লাইব্রেরি ইনজেকশন (সাউন্ড এরর ফিক্স)
-              if 'dependencies {' in c and 'androidx.media' not in c:
-                  c = c.replace('dependencies {', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', 1)
-              with open(p, 'w') as f: f.write(c)
+          def solve_gradle(path):
+              if not os.path.isfile(path): return
+              with open(path, 'r', errors='ignore') as f: content = f.read()
+              # ভার্সন ফিক্স
+              content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', content)
+              content = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', content)
+              content = re.sub(r'JavaVersion\.VERSION_1_[781]', 'JavaVersion.VERSION_17', content)
+              # মিডিয়া লাইব্রেরি ইনজেকশন
+              if 'dependencies {' in content and 'androidx.media' not in content:
+                  content = content.replace('dependencies {', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', 1)
+              with open(path, 'w') as f: f.write(content)
 
-          for g in glob.glob("./extracted/**/build.gradle", recursive=True): fix_gradle(g)
-          for g in glob.glob(os.path.expanduser("~/.pub-cache") + "/**/build.gradle", recursive=True): fix_gradle(g)
+          solve_pubspec()
+          for g in glob.glob("./extracted/**/build.gradle", recursive=True): solve_gradle(g)
+          for g in glob.glob(os.path.expanduser("~/.pub-cache") + "/**/build.gradle", recursive=True): solve_gradle(g)
           EOF
-          python3 /tmp/god_fix.py
+          python3 /tmp/fixer.py
 
-      - name: 🏗️ Execute Build
+      - name: 🏗️ Final Build Execution
         working-directory: ./extracted/SourceFixed
         run: |
-          # কি-স্টোর সেটআপ
+          # কি-স্টোর প্রোপার্টিজ
           printf "storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n" > android/key.properties
           
           flutter clean
           flutter pub get
+          flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation
           
-          if [ "${{ matrix.target }}" = "apk" ]; then
-            flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation
-            cp build/app/outputs/flutter-apk/app-release.apk ../../${{ matrix.file_name }}
-          else
-            flutter build appbundle --release --no-tree-shake-icons --android-skip-build-dependency-validation
-            cp build/app/outputs/bundle/release/app-release.aab ../../${{ matrix.file_name }}
-          fi
+          cp build/app/outputs/flutter-apk/app-release.apk ../../Nettumi-Final-App.apk
 
-      - name: 📤 Upload Artifacts
+      - name: 📤 Deliver APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.target }}-release
-          path: ${{ matrix.file_name }}
+          name: Download-Nettumi-APK
+          path: Nettumi-Final-App.apk
