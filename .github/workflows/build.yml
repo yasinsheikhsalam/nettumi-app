@@ -78,27 +78,17 @@ jobs:
           key: \( {{ runner.os }}-flutter- \){{ env.FLUTTER_VERSION }}-${{ hashFiles('extracted/SourceFixed/pubspec.lock') }}
           restore-keys: ${{ runner.os }}-flutter-
 
-      # ================== FIXED ULTRA NUCLEAR FIX ==================
+      # ================== ULTRA NUCLEAR FIX (YAML Safe) ==================
       - name: 🧬 ULTRA NUCLEAR FIX
         working-directory: ./extracted/SourceFixed
-        run: |
-          python3 - << 'EOF'
-import os
-import glob
-import re
+        run: python3 -c '
+import os, glob, re
+def log(m): print("🔧", m)
 
-def log(m):
-    print("🔧", m)
-
-# Fix pubspec.yaml - Remove duplicate dependency_overrides
-if os.path.exists('pubspec.yaml'):
-    with open('pubspec.yaml', 'r', encoding='utf-8') as f:
+if os.path.exists("pubspec.yaml"):
+    with open("pubspec.yaml", "r", encoding="utf-8") as f:
         content = f.read()
-    
-    # Remove any existing dependency_overrides section
-    content = re.sub(r'^\s*dependency_overrides:\s*(?:\n\s+.*)*', '', content, flags=re.MULTILINE)
-    
-    # Add fresh dependency_overrides at the end
+    content = re.sub(r"^\s*dependency_overrides:\s*(?:\n\s+.*)*", "", content, flags=re.MULTILINE)
     overrides = """\n\ndependency_overrides:
   intl: ^0.19.0
   collection: ^1.19.0
@@ -107,26 +97,23 @@ if os.path.exists('pubspec.yaml'):
   path_provider_android: ^2.1.2
 """
     content = content.rstrip() + overrides
-    
-    with open('pubspec.yaml', 'w', encoding='utf-8') as f:
+    with open("pubspec.yaml", "w", encoding="utf-8") as f:
         f.write(content)
-    log("pubspec.yaml fixed (duplicates removed)")
+    log("pubspec.yaml fixed")
 
-# Fix Gradle files
-for f in glob.glob('**/*gradle*', recursive=True):
-    if not os.path.isfile(f):
-        continue
-    with open(f, 'r', encoding='utf-8', errors='ignore') as ff:
+for f in glob.glob("**/*gradle*", recursive=True):
+    if not os.path.isfile(f): continue
+    with open(f, "r", encoding="utf-8", errors="ignore") as ff:
         c = ff.read()
-    c = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', c)
-    c = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', c)
-    c = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 21', c)
-    with open(f, 'w', encoding='utf-8') as ff:
+    c = re.sub(r"compileSdkVersion\s+\d+", "compileSdkVersion 34", c)
+    c = re.sub(r"targetSdkVersion\s+\d+", "targetSdkVersion 34", c)
+    c = re.sub(r"minSdkVersion\s+\d+", "minSdkVersion 21", c)
+    with open(f, "w", encoding="utf-8") as ff:
         ff.write(c)
-    log(f"Fixed Gradle: {f}")
+    log(f"Fixed: {f}")
 
 print("🎉 ULTRA NUCLEAR FIX COMPLETE!")
-EOF
+'
 
       # ================== BUILD ==================
       - name: 🏗️ Build ${{ matrix.target }}
