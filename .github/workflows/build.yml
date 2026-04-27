@@ -1,4 +1,4 @@
-name: Final Guaranteed Success Build
+name: Ultimate Success Build
 
 on:
   push:
@@ -27,80 +27,79 @@ jobs:
           flutter-version: '3.29.3'
           channel: 'stable'
 
-      - name: Extract Project
+      - name: Extract Project & Keystore
         run: |
           sudo apt-get install -y unzip python3
           unzip -q Nettumi-Adda-Source-Fixed-v11.zip -d extracted || true
-          unzip -q nettumi-keystore.zip -d keystore_out || true
-          KS=$(find . -name "*.keystore" -o -name "*.jks" | head -1)
-          mkdir -p extracted/SourceFixed/android/app
-          [ -f "$KS" ] && cp "$KS" extracted/SourceFixed/android/app/nettumi.keystore || echo "Keystore Not Found"
+          unzip -q nettumi-keystore.zip -d extracted/SourceFixed/android/app/ || true
+          # কি-স্টোর ফাইলটি সঠিক জায়গায় আছে কিনা নিশ্চিত করা
+          find extracted/SourceFixed/android/app/ -name "*.keystore" -exec cp {} extracted/SourceFixed/android/app/nettumi.keystore \;
+          find extracted/SourceFixed/android/app/ -name "*.jks" -exec cp {} extracted/SourceFixed/android/app/nettumi.keystore \;
 
-      - name: Python Intelligence Fixer (No Duplicates)
+      - name: Self-Healing Engine (Guaranteed Logic)
         run: |
-          cat > /tmp/intelligent_fix.py << 'EOF'
-          import os, re, glob
+          cat > /tmp/final_fixer.py << 'EOF'
+          import os, glob
 
-          def fix_gradle(file_path):
-              if not os.path.isfile(file_path): return
-              try:
-                  with open(file_path, 'r', errors='ignore') as f:
-                      content = f.read()
-                  
-                  # ১. অ্যান্ড্রয়েড কনফিগারেশন আপডেট
-                  content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', content)
-                  content = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', content)
-                  content = re.sub(r'compileSdk\s+\d+', 'compileSdk 34', content)
-                  
-                  # ২. মিডিয়া ডিপেন্ডেন্সি এরর ফিক্স (সঠিক পজিশনিং)
-                  if 'dependencies {' in content and 'androidx.media:media' not in content:
-                      content = content.replace('dependencies {', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', 1)
+          def patch_gradle(path):
+              if not os.path.isfile(path): return
+              with open(path, 'r', errors='ignore') as f: content = f.read()
+              # অ্যান্ড্রয়েড ও জাভা ভার্সন ফিক্স
+              import re
+              content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', content)
+              content = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', content)
+              content = re.sub(r'JavaVersion\.VERSION_1_[781]', 'JavaVersion.VERSION_17', content)
+              # মিডিয়া এরর ফিক্স
+              if 'dependencies {' in content and 'androidx.media:media' not in content:
+                  content = content.replace('dependencies {', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', 1)
+              with open(path, 'w') as f: f.write(content)
 
-                  with open(file_path, 'w') as f: f.write(content)
-              except: pass
-
-          def fix_pubspec(file_path):
-              if not os.path.isfile(file_path): return
-              try:
-                  with open(file_path, 'r') as f: lines = f.readlines()
-                  # ডুপ্লিকেট কী এড়াতে dependency_overrides থাকলে আগে তা সরিয়ে ফেলা
-                  new_lines = [l for l in lines if 'dependency_overrides:' not in l and '  intl:' not in l and '  collection:' not in l]
-                  # নতুন করে ওভাররাইড যুক্ত করা
-                  new_lines.append("\ndependency_overrides:\n  intl: any\n  collection: any\n  meta: any\n")
-                  with open(file_path, 'w') as f: f.writelines(new_lines)
-              except: pass
+          def patch_pubspec(path):
+              if not os.path.isfile(path): return
+              with open(path, 'r') as f: lines = f.readlines()
+              # ডুপ্লিকেট কী এড়াতে আগের সব ওভাররাইড মুছে ফেলা
+              clean_lines = []
+              skip = False
+              for line in lines:
+                  if 'dependency_overrides:' in line: skip = True
+                  if skip and line.strip() == "": skip = False
+                  if not skip: clean_lines.append(line)
+              # শেষে নতুন ওভাররাইড যোগ করা
+              clean_lines.append("\ndependency_overrides:\n  intl: any\n  collection: any\n  meta: any\n")
+              with open(path, 'w') as f: f.writelines(clean_lines)
 
           # রান প্যাচিং
-          fix_pubspec('./extracted/SourceFixed/pubspec.yaml')
-          for f in glob.glob("./extracted/**/build.gradle", recursive=True): fix_gradle(f)
-          for f in glob.glob(os.path.expanduser("~/.pub-cache") + "/**/build.gradle", recursive=True): fix_gradle(f)
+          patch_pubspec('./extracted/SourceFixed/pubspec.yaml')
+          for g in glob.glob("./extracted/**/build.gradle", recursive=True): patch_gradle(g)
+          for g in glob.glob(os.path.expanduser("~/.pub-cache") + "/**/build.gradle", recursive=True): patch_gradle(g)
           EOF
-          python3 /tmp/intelligent_fix.py
+          python3 /tmp/final_fixer.py
 
-      - name: Ultimate Build Execution
+      - name: Final Autonomous Build
         run: |
           cd extracted/SourceFixed
+          # লাইসেন্স গ্রহণ
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
           
-          # ফ্রেশ বিল্ড এনভায়রনমেন্ট
-          rm -f pubspec.lock
+          # কি-স্টোর প্রোপার্টিজ তৈরি
+          printf "storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n" > android/key.properties
+          
+          # ডিপেন্ডেন্সি ও বিল্ড
+          flutter clean
           flutter pub get
           
-          # ফাইনাল বিল্ড কমান্ড
           if flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation; then
-            echo "SUCCESS"
-            cp build/app/outputs/flutter-apk/app-release.apk $GITHUB_WORKSPACE/Nettumi-Build.apk
+            cp build/app/outputs/flutter-apk/app-release.apk ../../Nettumi-Final.apk
           else
-            # যদি প্রথমবার ফেইল করে, ক্যাশ ক্লিন করে শেষ চেষ্টা
-            flutter clean
-            flutter pub get
+            echo "বিল্ড ফেইল হয়েছে, কিন্তু আমি আবারও চেষ্টা করছি..."
+            flutter pub upgrade
             flutter build apk --release --no-tree-shake-icons
-            cp build/app/outputs/flutter-apk/app-release.apk $GITHUB_WORKSPACE/Nettumi-Build.apk
+            cp build/app/outputs/flutter-apk/app-release.apk ../../Nettumi-Final.apk
           fi
 
-      - name: Upload Final APK
+      - name: Deliver Final APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-Working-APK
-          path: Nettumi-Build.apk
+          path: Nettumi-Final.apk
