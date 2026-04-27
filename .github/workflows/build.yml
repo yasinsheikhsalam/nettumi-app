@@ -1,4 +1,4 @@
-name: Ultimate Final Success Build
+name: FINAL ABSOLUTE SOLUTION
 
 on:
   push:
@@ -12,89 +12,72 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up Environment
         uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: temurin
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Setup Flutter 3.29.3
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.29.3'
-          channel: 'stable'
 
-      - name: Extract & Preparation
+      - name: Force Extraction & Keystore
         run: |
-          sudo apt-get install -y unzip python3
           unzip -q Nettumi-Adda-Source-Fixed-v11.zip -d extracted || true
-          # কি-স্টোর ফাইলটি সঠিক জায়গায় সেট করা
           mkdir -p extracted/SourceFixed/android/app
-          unzip -q nettumi-keystore.zip -d keystore_temp || true
-          find keystore_temp -name "*.keystore" -o -name "*.jks" -exec cp {} extracted/SourceFixed/android/app/nettumi.keystore \;
+          unzip -q nettumi-keystore.zip -d temp_ks || true
+          find temp_ks -name "*" -type f -exec cp {} extracted/SourceFixed/android/app/nettumi.keystore \;
 
-      - name: Clean & Force Patch (Python)
+      - name: The Nuclear Fix (Python)
         run: |
-          cat > /tmp/clean_patch.py << 'EOF'
-          import os, glob, re
+          cat > /tmp/nuclear_fix.py << 'EOF'
+          import os, glob
 
-          # ১. pubspec.yaml থেকে ডুপ্লিকেট সরানো এবং ফ্রেশ করা
+          # ১. pubspec.yaml পুরোপুরি নতুন করে সাজানো (ডুপ্লিকেট এরর চিরতরে বন্ধ)
           pub_path = './extracted/SourceFixed/pubspec.yaml'
           if os.path.exists(pub_path):
               with open(pub_path, 'r') as f: lines = f.readlines()
-              # dependency_overrides থাকলে তা এবং তার নিচের লাইনগুলো মুছে ফেলা
-              final_lines = []
+              new_content = []
               for line in lines:
                   if 'dependency_overrides:' in line: break
-                  final_lines.append(line)
-              # একদম ফ্রেশ ভাবে একবারই যোগ করা
-              final_lines.append("\ndependency_overrides:\n  intl: ^0.20.0\n  collection: ^1.19.0\n  meta: ^1.15.0\n")
-              with open(pub_path, 'w') as f: f.writelines(final_lines)
+                  new_content.append(line)
+              new_content.append("\ndependency_overrides:\n  intl: any\n  collection: any\n  meta: any\n  flutter_svg: ^2.0.10+1\n")
+              with open(pub_path, 'w') as f: f.writelines(new_content)
 
-          # ২. গ্র্যাডল ফাইলগুলোতে মিডিয়া ফিক্স ও ভার্সন আপডেট
-          def fix_gradle(p):
+          # ২. সব বিল্ড ফাইল একবারে ফিক্স
+          def fix_file(p):
               if not os.path.isfile(p): return
               with open(p, 'r', errors='ignore') as f: c = f.read()
+              import re
               c = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', c)
               c = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', c)
               c = re.sub(r'JavaVersion\.VERSION_1_[781]', 'JavaVersion.VERSION_17', c)
-              if 'dependencies {' in c and 'androidx.media:media' not in c:
+              if 'dependencies {' in c and 'androidx.media' not in c:
                   c = c.replace('dependencies {', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', 1)
               with open(p, 'w') as f: f.write(c)
 
-          for g in glob.glob("./extracted/**/build.gradle", recursive=True): fix_gradle(g)
-          for g in glob.glob(os.path.expanduser("~/.pub-cache") + "/**/build.gradle", recursive=True): fix_gradle(g)
+          for g in glob.glob("./extracted/**/build.gradle", recursive=True): fix_file(g)
+          for g in glob.glob(os.path.expanduser("~/.pub-cache") + "/**/build.gradle", recursive=True): fix_file(g)
           EOF
-          python3 /tmp/clean_patch.py
+          python3 /tmp/nuclear_fix.py
 
-      - name: Build APK (Self-Healing)
+      - name: Build and Deliver
         run: |
           cd extracted/SourceFixed
-          # লাইসেন্স এক্সেপ্ট করা
-          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          
-          # কি-প্রোপার্টিজ তৈরি
+          # কি-স্টোর সেটআপ
           printf "storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n" > android/key.properties
           
-          # ফ্রেশ বিল্ড
+          # বিল্ড প্রসেস
           flutter clean
           flutter pub get
+          flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation
           
-          # বিল্ড কমান্ড (যদি ফেইল হয় তবে অটো-ট্রাই)
-          if ! flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation; then
-             echo "প্রথম চেষ্টায় ব্যর্থ, রি-ট্রাই করা হচ্ছে..."
-             flutter pub upgrade
-             flutter build apk --release --no-tree-shake-icons
-          fi
-          
-          cp build/app/outputs/flutter-apk/app-release.apk ../../Nettumi-Final.apk
+          cp build/app/outputs/flutter-apk/app-release.apk ../../Nettumi-Final-Success.apk
 
-      - name: Deliver Result
-        if: success()
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Nettumi-Adda-Working-APK
-          path: Nettumi-Final.apk
+          name: Download-Your-App-Here
+          path: Nettumi-Final-Success.apk
