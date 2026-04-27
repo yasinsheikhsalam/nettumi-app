@@ -14,7 +14,7 @@ on:
         type: boolean
 
 env:
-  FLUTTER_VERSION: '3.24.5'   # Changed to a stable & known version
+  FLUTTER_VERSION: '3.24.5'   # Stable and tested
   JAVA_VERSION: '17'
 
 jobs:
@@ -41,9 +41,9 @@ jobs:
           
           if [ -f "Nettumi-Adda-Source-Fixed-v11.zip" ]; then
             unzip -q "Nettumi-Adda-Source-Fixed-v11.zip" -d extracted/
-            echo "✅ Source extracted successfully"
+            echo "✅ Source extracted"
           else
-            echo "❌ Source ZIP (Nettumi-Adda-Source-Fixed-v11.zip) not found!"
+            echo "❌ Source ZIP not found!"
             exit 1
           fi
           
@@ -64,7 +64,7 @@ jobs:
           cache: 'gradle'
           cache-dependency-path: extracted/SourceFixed/**/*.gradle*
 
-      # ================== Flutter Setup (Fixed) ==================
+      # ================== Flutter Setup ==================
       - name: 🦋 Setup Flutter ${{ env.FLUTTER_VERSION }}
         uses: subosito/flutter-action@v2
         with:
@@ -82,8 +82,8 @@ jobs:
           key: \( {{ runner.os }}-flutter- \){{ env.FLUTTER_VERSION }}-${{ hashFiles('extracted/SourceFixed/pubspec.lock') }}
           restore-keys: ${{ runner.os }}-flutter-
 
-      # ================== ULTRA NUCLEAR FIX ==================
-      - name: 🧬 ULTRA NUCLEAR FIX
+      # ================== IMPROVED ULTRA NUCLEAR FIX (Duplicate Fixed) ==================
+      - name: 🧬 ULTRA NUCLEAR FIX - Smart pubspec Fix
         working-directory: ./extracted/SourceFixed
         run: |
           cat > /tmp/fix.py << 'EOF'
@@ -91,28 +91,32 @@ jobs:
           ROOT = '.'
           def log(m): print("🔧", m)
 
-          if os.path.exists('pubspec.yaml'):
-              with open('pubspec.yaml', 'r', encoding='utf-8') as f:
-                  lines = f.readlines()
-              clean = []
-              seen = set()
-              for line in lines:
-                  s = line.strip()
-                  if s.startswith('dependencies:'):
-                      clean.append(line)
-                      continue
-                  if s.startswith('  ') and ':' in s and not s.startswith('  #'):
-                      dep = s.split(':')[0].strip()
-                      if dep not in seen:
-                          seen.add(dep)
-                          clean.append(line)
-                      continue
-                  clean.append(line)
-              clean.append('\ndependency_overrides:\n  intl: ^0.19.0\n  collection: ^1.19.0\n')
-              with open('pubspec.yaml', 'w', encoding='utf-8') as f:
-                  f.writelines(clean)
-              log("pubspec.yaml fixed")
+          pubspec = 'pubspec.yaml'
+          if os.path.exists(pubspec):
+              with open(pubspec, 'r', encoding='utf-8') as f:
+                  content = f.read()
 
+              # Remove existing dependency_overrides section if present
+              content = re.sub(r'dependency_overrides:\s*(\n\s+.*)*', '', content, flags=re.MULTILINE)
+
+              # Add clean dependency_overrides at the end
+              overrides = """\n\ndependency_overrides:
+  intl: ^0.19.0
+  collection: ^1.19.0
+  meta: ^1.12.0
+  flutter_svg: ^2.0.10+1
+  path_provider_android: ^2.1.2
+"""
+
+              # Append only if not already ending with overrides
+              if not content.strip().endswith('dependency_overrides:'):
+                  content = content.rstrip() + overrides
+
+              with open(pubspec, 'w', encoding='utf-8') as f:
+                  f.write(content)
+              log("✅ pubspec.yaml fixed (duplicate overrides removed)")
+
+          # Gradle fixes
           for f in glob.glob('**/*gradle*', recursive=True):
               if not os.path.isfile(f): continue
               with open(f, 'r', encoding='utf-8', errors='ignore') as ff:
@@ -122,7 +126,7 @@ jobs:
               c = re.sub(r'minSdkVersion\s+\d+', 'minSdkVersion 21', c)
               with open(f, 'w', encoding='utf-8') as ff:
                   ff.write(c)
-              log(f"Fixed: {f}")
+              log(f"✅ Fixed Gradle: {f}")
           EOF
           python3 /tmp/fix.py
 
@@ -133,6 +137,7 @@ jobs:
           flutter clean
           flutter pub get || flutter pub get || flutter pub get
 
+          echo "🚀 Starting ${{ matrix.target.toUpperCase() }} build..."
           if [ "${{ matrix.target }}" = "apk" ]; then
             flutter build apk --release --no-tree-shake-icons
             cp build/app/outputs/flutter-apk/app-release.apk ../../Nettumi-APK-Success.apk
