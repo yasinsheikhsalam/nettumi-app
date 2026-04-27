@@ -33,16 +33,13 @@ jobs:
         run: |
           sudo apt-get install -y unzip
           unzip -q Nettumi-Adda-Source-Fixed-v11.zip -d extracted
-          echo "=== Extracted ==="
           ls extracted/SourceFixed/
 
       - name: Extract Keystore
         run: |
           unzip -q nettumi-keystore.zip -d keystore_out
           KEYSTORE_SRC=$(find keystore_out -type f \( -name "*.keystore" -o -name "*.jks" \) | head -1)
-          echo "Keystore: $KEYSTORE_SRC"
           cp "$KEYSTORE_SRC" extracted/SourceFixed/android/app/nettumi.keystore
-          ls -la extracted/SourceFixed/android/app/nettumi.keystore
 
       - name: Configure signing & properties
         run: |
@@ -52,8 +49,6 @@ jobs:
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KS_PATH" > $SRC/android/key.properties
           printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK" "$ANDROID_SDK_ROOT" > $SRC/android/local.properties
           chmod +x $SRC/android/gradlew
-          echo "local.properties:"; cat $SRC/android/local.properties
-          echo "key.properties:"; cat $SRC/android/key.properties
 
       - name: Fix pubspec & pub get
         run: |
@@ -61,9 +56,7 @@ jobs:
           sed -i 's/flutter_svg:.*/flutter_svg: ^2.0.10+1/' pubspec.yaml
           sed -i 's/url_launcher:.*/url_launcher: ^6.2.5/' pubspec.yaml
           sed -i 's/flutter_lints:.*/flutter_lints: ^3.0.0/' pubspec.yaml
-          if ! grep -q "dependency_overrides:" pubspec.yaml; then
-            printf '\ndependency_overrides:\n  intl: ^0.20.0\n  collection: ^1.19.0\n' >> pubspec.yaml
-          fi
+          grep -q "dependency_overrides:" pubspec.yaml || printf '\ndependency_overrides:\n  intl: ^0.20.0\n  collection: ^1.19.0\n' >> pubspec.yaml
           rm -f pubspec.lock
           flutter config --android-sdk $ANDROID_SDK_ROOT
           flutter pub get
@@ -71,140 +64,94 @@ jobs:
       - name: Accept Android licenses
         run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: AUTO-FIX ENGINE — pub-cache all paths
+      - name: Create auto-fix Python script
         run: |
-          echo "════ AUTO-FIX ENGINE STARTED ════"
+          cat > /tmp/fix_gradle.py << 'EOF'
+import os
+import re
+import sys
+import glob
 
-          fix_build_gradle() {
-            local BG="$1"
-            [ -f "$BG" ] || return
-            local PKG=$(basename $(dirname $(dirname "$BG")))
-            echo "── Fixing: $PKG"
+def fix_gradle(bg):
+    if not os.path.isfile(bg):
+        return
+    pkg = os.path.basename(os.path.dirname(os.path.dirname(bg)))
+    print(f"Fixing: {pkg}")
 
-            if ! grep -q "namespace" "$BG"; then
-              local MANIFEST=$(dirname "$BG")/src/main/AndroidManifest.xml
-              local NS=$(grep -o 'package="[^"]*"' "$MANIFEST" 2>/dev/null | head -1 | sed 's/package="//;s/"//')
-              if [ -n "$NS" ]; then
-                sed -i "/^android {/a\\    namespace '${NS}'" "$BG"
-                echo "  [FIX 1] namespace='$NS' added"
-              fi
-            fi
+    with open(bg, 'r', errors='ignore') as f:
+        content = f.read()
 
-            python3 - "$BG" <<'PYEOF'
-import re, sys
-path = sys.argv[1]
-try:
-    content = open(path).read()
+    # FIX 1: Remove kotlinOptions block
     content = re.sub(r'\s*kotlinOptions\s*\{[^}]*\}', '', content)
-    open(path, 'w').write(content)
-    print(f"  [FIX 2] kotlinOptions removed from {path}")
-except Exception as e:
-    print(f"  [SKIP] {e}")
-PYEOF
 
-            if grep -q "compileOptions" "$BG"; then
-              sed -i 's/sourceCompatibility JavaVersion\.[A-Z_0-9]*/sourceCompatibility JavaVersion.VERSION_17/g' "$BG"
-              sed -i 's/targetCompatibility JavaVersion\.[A-Z_0-9]*/targetCompatibility JavaVersion.VERSION_17/g' "$BG"
-              sed -i 's/JavaVersion\.VERSION_1_8/JavaVersion.VERSION_17/g' "$BG"
-              sed -i 's/JavaVersion\.VERSION_11/JavaVersion.VERSION_17/g' "$BG"
-              echo "  [FIX 3] compileOptions → VERSION_17"
-            else
-              sed -i "/^android {/a\\    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }" "$BG"
-              echo "  [FIX 3] compileOptions injected"
-            fi
+    # FIX 2: namespace
+    if 'namespace' not in content and 'android {' in content:
+        manifest = os.path.join(os.path.dirname(bg), 'src', 'main', 'AndroidManifest.xml')
+        ns = ''
+        if os.path.isfile(manifest):
+            m = re.search(r'package="([^"]+)"', open(manifest, errors='ignore').read())
+            if m:
+                ns = m.group(1)
+        if ns:
+            content = content.replace('android {', f"android {{\n    namespace '{ns}'", 1)
+            print(f"  [FIX] namespace={ns}")
 
-            if ! grep -q "compileSdkVersion\|compileSdk " "$BG"; then
-              sed -i "/^android {/a\\    compileSdkVersion 34" "$BG"
-              echo "  [FIX 4] compileSdkVersion 34 injected"
-            else
-              CSDK=$(grep -oE "compileSdkVersion [0-9]+" "$BG" | awk '{print $2}' | head -1)
-              if [ -n "$CSDK" ] && [ "$CSDK" -lt 33 ] 2>/dev/null; then
-                sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 34/g' "$BG"
-                echo "  [FIX 4] compileSdkVersion → 34"
-              fi
-            fi
-          }
+    # FIX 3: compileSdkVersion missing
+    if 'compileSdkVersion' not in content and 'compileSdk ' not in content:
+        if 'android {' in content:
+            content = content.replace('android {', 'android {\n    compileSdkVersion 34', 1)
+            print(f"  [FIX] compileSdkVersion 34 added")
+    else:
+        content = re.sub(r'compileSdkVersion\s+[0-2][0-9](?!\d)', 'compileSdkVersion 34', content)
+        content = re.sub(r'compileSdkVersion\s+3[0-2](?!\d)', 'compileSdkVersion 34', content)
 
-          for PUB_ROOT in \
-            "$HOME/.pub-cache/hosted/pub.dev" \
-            "$HOME/.pub-cache/hosted/pub.dev/hosted/pub.dev"; do
-            [ -d "$PUB_ROOT" ] || continue
-            echo "=== Scanning: $PUB_ROOT ==="
-            while IFS= read -r BG; do
-              fix_build_gradle "$BG"
-            done < <(find "$PUB_ROOT" -maxdepth 4 -name "build.gradle" -path "*/android/build.gradle" 2>/dev/null)
-          done
+    # FIX 4: JavaVersion
+    content = content.replace('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_17')
+    content = content.replace('JavaVersion.VERSION_11', 'JavaVersion.VERSION_17')
+    content = content.replace('JavaVersion.VERSION_1_7', 'JavaVersion.VERSION_17')
 
-          echo "════ AUTO-FIX ENGINE DONE ════"
+    # FIX 5: compileOptions missing
+    if 'compileOptions' not in content and 'android {' in content:
+        content = content.replace('android {',
+            'android {\n    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }',
+            1)
+        print(f"  [FIX] compileOptions added")
 
-      - name: HARDCODED FIX — audio_session & image_gallery_saver
+    with open(bg, 'w') as f:
+        f.write(content)
+
+pub_roots = [
+    os.path.expanduser('~/.pub-cache/hosted/pub.dev'),
+    os.path.expanduser('~/.pub-cache/hosted/pub.dev/hosted/pub.dev'),
+]
+
+for root in pub_roots:
+    if not os.path.isdir(root):
+        continue
+    print(f"\n=== Scanning: {root} ===")
+    for bg in glob.glob(os.path.join(root, '**', 'android', 'build.gradle'), recursive=True):
+        fix_gradle(bg)
+
+print("\nDONE")
+EOF
+          echo "Script created"
+
+      - name: AUTO-FIX ENGINE — run Python fix
+        run: python3 /tmp/fix_gradle.py
+
+      - name: HARDCODED FIX — audio_session full rewrite
         run: |
-          echo "════ HARDCODED FIXES ════"
-
           for AUDIO_DIR in $(find "$HOME/.pub-cache" -maxdepth 6 -type d -name "audio_session*" 2>/dev/null); do
             BG="$AUDIO_DIR/android/build.gradle"
             [ -f "$BG" ] || continue
-            echo "Rewriting: $BG"
             MANIFEST="$AUDIO_DIR/android/src/main/AndroidManifest.xml"
             NS=$(grep -o 'package="[^"]*"' "$MANIFEST" 2>/dev/null | head -1 | sed 's/package="//;s/"//')
             NS="${NS:-com.ryanheise.audio_session}"
-            cat > "$BG" <<GRADLE
-group 'com.ryanheise.audio_session'
-version '1.0-SNAPSHOT'
-
-buildscript {
-    repositories {
-        google()
-        mavenCentral()
-    }
-    dependencies {
-        classpath 'com.android.tools.build:gradle:8.3.0'
-        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24'
-    }
-}
-
-apply plugin: 'com.android.library'
-apply plugin: 'kotlin-android'
-
-android {
-    namespace '$NS'
-    compileSdkVersion 34
-
-    compileOptions {
-        sourceCompatibility JavaVersion.VERSION_17
-        targetCompatibility JavaVersion.VERSION_17
-    }
-
-    defaultConfig {
-        minSdkVersion 21
-        targetSdkVersion 34
-    }
-
-    dependencies {
-        implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'
-    }
-}
-GRADLE
-            echo "  [DONE] audio_session rewritten: namespace=$NS"
+            printf "group 'com.ryanheise.audio_session'\nversion '1.0-SNAPSHOT'\n\nbuildscript {\n    repositories {\n        google()\n        mavenCentral()\n    }\n    dependencies {\n        classpath 'com.android.tools.build:gradle:8.3.0'\n        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24'\n    }\n}\n\napply plugin: 'com.android.library'\napply plugin: 'kotlin-android'\n\nandroid {\n    namespace '%s'\n    compileSdkVersion 34\n\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17\n    }\n\n    defaultConfig {\n        minSdkVersion 21\n        targetSdkVersion 34\n    }\n\n    dependencies {\n        implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'\n    }\n}\n" "$NS" > "$BG"
+            echo "audio_session rewritten: $BG (namespace=$NS)"
           done
 
-          for IGS_DIR in $(find "$HOME/.pub-cache" -maxdepth 6 -type d -name "image_gallery_saver*" 2>/dev/null); do
-            BG="$IGS_DIR/android/build.gradle"
-            [ -f "$BG" ] || continue
-            if ! grep -q "namespace" "$BG"; then
-              MANIFEST="$IGS_DIR/android/src/main/AndroidManifest.xml"
-              NS=$(grep -o 'package="[^"]*"' "$MANIFEST" 2>/dev/null | head -1 | sed 's/package="//;s/"//')
-              NS="${NS:-com.example.imagegallerysaver}"
-              sed -i "/^android {/a\\    namespace '${NS}'" "$BG"
-              echo "  [DONE] image_gallery_saver namespace='$NS' → $BG"
-            else
-              echo "  [OK] image_gallery_saver namespace present: $BG"
-            fi
-          done
-
-          echo "════ HARDCODED FIXES DONE ════"
-
-      - name: Fix project-level Gradle files
+      - name: Fix project-level Gradle
         run: |
           SRC=$GITHUB_WORKSPACE/extracted/SourceFixed/android
           if [ -f "$SRC/build.gradle" ]; then
@@ -213,77 +160,45 @@ GRADLE
           fi
           if [ -f "$SRC/app/build.gradle" ]; then
             sed -i 's/JavaVersion\.VERSION_1_8/JavaVersion.VERSION_17/g' "$SRC/app/build.gradle" || true
-            sed -i 's/JavaVersion\.VERSION_11/JavaVersion.VERSION_17/g'  "$SRC/app/build.gradle" || true
-            sed -i "s/jvmTarget = '[^']*'/jvmTarget = '17'/g"            "$SRC/app/build.gradle" || true
+            sed -i 's/JavaVersion\.VERSION_11/JavaVersion.VERSION_17/g' "$SRC/app/build.gradle" || true
+            sed -i "s/jvmTarget = '[^']*'/jvmTarget = '17'/g" "$SRC/app/build.gradle" || true
           fi
-          echo "[OK] Project gradle files updated"
 
       - name: Build APK — Auto-Retry Engine
         run: |
           cd $GITHUB_WORKSPACE/extracted/SourceFixed
           find lib -name "*.dart" -exec sed -i 's/context\.router\.pop()/context.maybePop()/g' {} \; 2>/dev/null || true
 
-          run_build() {
-            flutter build apk --release \
-              --build-name=2.0.0 \
-              --build-number=2 \
-              --android-skip-build-dependency-validation 2>&1 | tee "$1"
-            return ${PIPESTATUS[0]}
-          }
-
-          emergency_fix() {
-            for PUB_ROOT in "$HOME/.pub-cache/hosted/pub.dev" "$HOME/.pub-cache/hosted/pub.dev/hosted/pub.dev"; do
-              [ -d "$PUB_ROOT" ] || continue
-              find "$PUB_ROOT" -maxdepth 4 -name "build.gradle" -path "*/android/build.gradle" | while read BG; do
-                if ! grep -q "namespace" "$BG"; then
-                  NS=$(grep -o 'package="[^"]*"' "$(dirname $BG)/src/main/AndroidManifest.xml" 2>/dev/null | head -1 | sed 's/package="//;s/"//')
-                  [ -n "$NS" ] && sed -i "/^android {/a\\    namespace '${NS}'" "$BG"
-                fi
-                if ! grep -q "compileSdkVersion\|compileSdk " "$BG"; then
-                  sed -i "/^android {/a\\    compileSdkVersion 34" "$BG"
-                fi
-                python3 -c "
-import re
-path='$BG'
-try:
-  c=open(path).read()
-  c=re.sub(r'\s*kotlinOptions\s*\{[^}]*\}','',c)
-  open(path,'w').write(c)
-except: pass
-" 2>/dev/null || true
-              done
-            done
-          }
-
           echo "════ ATTEMPT 1 ════"
-          if run_build /tmp/build1.log; then
-            echo "✅ ATTEMPT 1 SUCCESS"
-          else
-            echo "❌ ATTEMPT 1 FAILED → emergency fix"
-            emergency_fix
+          flutter build apk --release --build-name=2.0.0 --build-number=2 --android-skip-build-dependency-validation 2>&1 | tee /tmp/build1.log && BUILD_OK=1 || BUILD_OK=0
+
+          if [ "$BUILD_OK" = "0" ]; then
+            echo "ATTEMPT 1 FAILED, re-running fix engine..."
+            python3 /tmp/fix_gradle.py
+
             echo "════ ATTEMPT 2 ════"
-            if run_build /tmp/build2.log; then
-              echo "✅ ATTEMPT 2 SUCCESS"
-            else
-              echo "❌ ATTEMPT 2 FAILED → flutter clean + retry"
-              flutter clean 2>/dev/null || true
-              flutter pub get 2>/dev/null || true
-              emergency_fix
-              echo "════ ATTEMPT 3 ════"
-              if run_build /tmp/build3.log; then
-                echo "✅ ATTEMPT 3 SUCCESS"
-              else
-                echo "❌ ALL 3 ATTEMPTS FAILED"
-                tail -80 /tmp/build3.log || tail -80 /tmp/build2.log || tail -80 /tmp/build1.log
-                exit 1
-              fi
-            fi
+            flutter build apk --release --build-name=2.0.0 --build-number=2 --android-skip-build-dependency-validation 2>&1 | tee /tmp/build2.log && BUILD_OK=1 || BUILD_OK=0
           fi
 
-          APK_SRC="$GITHUB_WORKSPACE/extracted/SourceFixed/build/app/outputs/flutter-apk/app-release.apk"
-          ls -la "$(dirname $APK_SRC)/"
-          cp "$APK_SRC" "$GITHUB_WORKSPACE/Nettumi-Adda-v2.apk"
-          echo "✅ APK ready:" && ls -lh "$GITHUB_WORKSPACE/Nettumi-Adda-v2.apk"
+          if [ "$BUILD_OK" = "0" ]; then
+            echo "ATTEMPT 2 FAILED, flutter clean + retry..."
+            flutter clean || true
+            flutter pub get || true
+            python3 /tmp/fix_gradle.py
+
+            echo "════ ATTEMPT 3 ════"
+            flutter build apk --release --build-name=2.0.0 --build-number=2 --android-skip-build-dependency-validation 2>&1 | tee /tmp/build3.log && BUILD_OK=1 || BUILD_OK=0
+          fi
+
+          if [ "$BUILD_OK" = "0" ]; then
+            echo "ALL 3 ATTEMPTS FAILED"
+            tail -80 /tmp/build3.log || tail -80 /tmp/build2.log || tail -80 /tmp/build1.log
+            exit 1
+          fi
+
+          APK="$GITHUB_WORKSPACE/extracted/SourceFixed/build/app/outputs/flutter-apk/app-release.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/Nettumi-Adda-v2.apk"
+          echo "APK ready:" && ls -lh "$GITHUB_WORKSPACE/Nettumi-Adda-v2.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -292,21 +207,15 @@ except: pass
           path: Nettumi-Adda-v2.apk
           if-no-files-found: error
 
-      - name: Full Diagnosis on any failure
+      - name: Diagnosis on failure
         if: failure()
         run: |
-          echo "════ FULL DIAGNOSIS ════"
-          for LOG in /tmp/build1.log /tmp/build2.log /tmp/build3.log; do
-            [ -f "$LOG" ] && echo "--- $LOG ---" && tail -40 "$LOG" || true
+          echo "=== Build Logs ==="
+          for L in /tmp/build1.log /tmp/build2.log /tmp/build3.log; do
+            [ -f "$L" ] && tail -40 "$L" || true
           done
           echo "=== Missing namespace ==="
           find "$HOME/.pub-cache" -name "build.gradle" -path "*/android/build.gradle" 2>/dev/null | while read BG; do
             grep -q "namespace" "$BG" || echo "MISSING: $BG"
           done || true
-          echo "=== audio_session build.gradle ==="
-          find "$HOME/.pub-cache" -path "*audio_session*/android/build.gradle" 2>/dev/null | xargs cat || true
-          echo "=== Flutter doctor ==="
           flutter doctor -v || true
-          echo "=== Gradle stacktrace ==="
-          cd $GITHUB_WORKSPACE/extracted/SourceFixed/android 2>/dev/null && \
-            ./gradlew assembleRelease --stacktrace 2>&1 | grep -E "FAILURE|Caused by:|> Task" | head -50 || true
