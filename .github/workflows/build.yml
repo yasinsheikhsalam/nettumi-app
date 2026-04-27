@@ -1,4 +1,4 @@
-name: Ultimate Autonomous Self-Healing Build
+name: Extreme Autonomous Self-Healing Build
 
 on:
   push:
@@ -26,44 +26,45 @@ jobs:
         with:
           flutter-version: '3.29.3'
           channel: 'stable'
-          cache: true
+          cache: false # ক্যাশ এরর এড়াতে ফলস করা হয়েছে
 
-      - name: Preparation & Keystore Auto-Inject
+      - name: Reset & Inject Keystore
         run: |
           sudo apt-get install -y unzip python3
           unzip -q Nettumi-Adda-Source-Fixed-v11.zip -d extracted || true
           unzip -q nettumi-keystore.zip -d keystore_out || true
           KS=$(find . -name "*.keystore" -o -name "*.jks" | head -1)
           mkdir -p extracted/SourceFixed/android/app
-          [ -f "$KS" ] && cp "$KS" extracted/SourceFixed/android/app/nettumi.keystore || echo "Keystore Not Found"
+          [ -f "$KS" ] && cp "$KS" extracted/SourceFixed/android/app/nettumi.keystore || echo "Keystore missing"
 
-      - name: Autonomous Healing Engine (Python)
+      - name: Autonomous Healing Logic (Python)
         run: |
-          cat > /tmp/heal_engine.py << 'EOF'
+          cat > /tmp/autonomous_heal.py << 'EOF'
           import os, re, glob
 
-          def solve_gradle_issues(file_path):
+          def auto_patch(file_path):
               if not os.path.exists(file_path) or os.path.isdir(file_path): return
               try:
                   with open(file_path, 'r', errors='ignore') as f:
                       content = f.read()
                   
-                  # ১. ভার্সন ফিক্স (৩/৩৪ রুল)
+                  # ১. অ্যান্ড্রয়েড টার্গেট ফিক্স
                   content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', content)
                   content = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', content)
                   content = re.sub(r'compileSdk\s+\d+', 'compileSdk 34', content)
                   
-                  # ২. জাভা ১৭ এনফোর্সমেন্ট
+                  # ২. জাভা ১৭ কনফিগারেশন
                   content = re.sub(r'JavaVersion\.VERSION_1_[78]', 'JavaVersion.VERSION_17', content)
                   content = re.sub(r'JavaVersion\.VERSION_11', 'JavaVersion.VERSION_17', content)
                   
-                  # ৩. অডিও সেশন এরর ফিক্স
+                  # ৩. অডিও সেশন / মিডিয়া এরর ফিক্স
                   if 'dependencies {' in content and 'androidx.media' not in content:
                       content = content.replace('dependencies {', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', 1)
                   
-                  # ৪. অটো নেমস্পেস ইনজেকশন
+                  # ৪. প্যাকেজ নেম / নেমস্পেস অটো-ম্যাচ
                   if 'android {' in content and 'namespace' not in content:
-                      manifest = os.path.join(os.path.dirname(file_path), 'src', 'main', 'AndroidManifest.xml')
+                      manifest_dir = os.path.dirname(file_path)
+                      manifest = os.path.join(manifest_dir, 'src', 'main', 'AndroidManifest.xml')
                       if os.path.exists(manifest):
                           with open(manifest, 'r') as m:
                               pkg = re.search(r'package="([^"]+)"', m.read())
@@ -72,9 +73,10 @@ jobs:
                   with open(file_path, 'w') as f: f.write(content)
               except: pass
 
+          # প্রজেক্ট এবং সব ইন্টারনাল লাইব্রেরি স্ক্যান
           for root in ['./extracted', os.path.expanduser('~/.pub-cache')]:
               for bg in glob.glob(f"{root}/**/build.gradle", recursive=True):
-                  solve_gradle_issues(bg)
+                  auto_patch(bg)
           EOF
 
       - name: Execute Autonomous Build Loop
@@ -82,41 +84,44 @@ jobs:
           cd extracted/SourceFixed
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
           
+          # ৫টি ভিন্ন শক্তিশালী উপায়ে বিল্ড চেষ্টা
           for i in {1..5}; do
-            echo "════════════════════════════════════════════"
-            echo "  AUTONOMOUS FIX ATTEMPT: $i"
-            echo "════════════════════════════════════════════"
+            echo "══════════════════════════════════════"
+            echo "  AUTONOMOUS ATTEMPT $i"
+            echo "══════════════════════════════════════"
             
-            # প্রি-বিল্ড ফিক্স
-            python3 /tmp/heal_engine.py
+            # প্রতিবার লুপে ক্লিনআপ ও প্যাচ
+            python3 /tmp/autonomous_heal.py
             printf "android.useAndroidX=true\nandroid.enableJetifier=true\n" > android/gradle.properties
             
-            # বিল্ড ট্রাই (উইথ অটো-ডিপেন্ডেন্সি ফিক্স)
+            # লেভেল ভিত্তিক ফোর্স ফিক্স
+            if [ $i -ge 2 ]; then
+               echo "Level 2: Nuclear cleaning pubspec..."
+               rm -rf .dart_tool/ pubspec.lock
+               flutter pub get
+            fi
+
+            if [ $i -ge 3 ]; then
+               echo "Level 3: Hardcoding dependency overrides..."
+               # pubspec-এ অটোমেটিক ওভাররাইড যোগ করা হচ্ছে যাতে কনফ্লিক্ট না হয়
+               grep -q "dependency_overrides:" pubspec.yaml || printf "\ndependency_overrides:\n  intl: any\n  collection: any\n" >> pubspec.yaml
+               flutter pub get
+            fi
+
             if flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation; then
-              echo "BUILD SUCCESSFUL!"
-              cp build/app/outputs/flutter-apk/app-release.apk $GITHUB_WORKSPACE/Nettumi-Build-Completed.apk
+              echo "BUILD SUCCESS!"
+              cp build/app/outputs/flutter-apk/app-release.apk $GITHUB_WORKSPACE/Nettumi-Handover.apk
               exit 0
             fi
             
-            echo "Attempt $i failed. Applying deeper fixes..."
+            echo "Attempt $i failed, escalating healing engine..."
             flutter clean
-            
-            # লেভেল ৩: ডিপেন্ডেন্সি রেজোলিউশন ফিক্স
-            if [ $i -ge 2 ]; then
-               rm -f pubspec.lock
-               flutter pub get --allow-fallback
-            fi
-
-            # লেভেল ৪: গ্র্যাডল ফাইল মেরামত (নিরাপদভাবে)
-            if [ $i -ge 3 ]; then
-               find android -maxdepth 2 -name "*.gradle" -type f -exec sed -i 's/8.0/8.3/g' {} +
-            fi
           done
           exit 1
 
-      - name: Upload Success Artifact
+      - name: Handover APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Nettumi-Adda-Final-APK
-          path: Nettumi-Build-Completed.apk
+          name: Nettumi-Adda-APK
+          path: Nettumi-Handover.apk
