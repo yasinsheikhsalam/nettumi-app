@@ -22,60 +22,91 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Setup Flutter (Latest Stable)
+      - name: Setup Flutter 3.29.3
         uses: subosito/flutter-action@v2
         with:
+          flutter-version: '3.29.3'
           channel: 'stable'
           cache: true
 
-      - name: Extract Project (Dynamic Detection)
+      - name: Extract Project
         run: |
           sudo apt-get install -y unzip
-          # রিপোজিটরিতে থাকা যেকোনো .zip ফাইল (keystore বাদে) খুঁজে বের করা
-          SOURCE_ZIP=$(ls *.zip | grep -v "keystore" | head -n 1)
-          if [ -z "$SOURCE_ZIP" ]; then echo "Error: No ZIP file found!"; exit 1; fi
-          unzip -q "$SOURCE_ZIP" -d extracted
-          
-          # pubspec.yaml এর পাথ ডাইনামিকভাবে খুঁজে বের করা
-          REAL_SOURCE=$(find $(pwd)/extracted -name "pubspec.yaml" -exec dirname {} \;)
-          echo "SOURCE_PATH=$REAL_SOURCE" >> $GITHUB_ENV
-          echo "Project extracted to: $REAL_SOURCE"
+          unzip -q Nettumi-Adda-Source-Fixed-v6.zip -d extracted
+          echo "=== Extracted ==="
+          ls extracted/SourceFixed/
 
       - name: Extract Keystore
         run: |
-          if [ -f "nettumi-keystore.zip" ]; then
-            unzip -q nettumi-keystore.zip -d keystore_temp
-            mkdir -p ${{ env.SOURCE_PATH }}/android/app/
-            find keystore_temp -name "*.keystore" -o -name "*.jks" -exec cp {} ${{ env.SOURCE_PATH }}/android/app/nettumi.keystore \;
-          fi
+          unzip -q nettumi-keystore.zip -d keystore_extracted
+          ls keystore_extracted/
+          cp keystore_extracted/*.keystore extracted/SourceFixed/android/app/nettumi.keystore 2>/dev/null || \
+          cp keystore_extracted/*.jks extracted/SourceFixed/android/app/nettumi.keystore 2>/dev/null || \
+          find keystore_extracted -type f -exec cp {} extracted/SourceFixed/android/app/nettumi.keystore \;
 
-      - name: Configure Signing & Environment
+      - name: Configure Signing & local.properties
         run: |
           FLUTTER_SDK_PATH=$(dirname $(dirname $(which flutter)))
-          CONF_DIR=${{ env.SOURCE_PATH }}/android
-          
-          # key.properties এবং local.properties তৈরি
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n' > $CONF_DIR/key.properties
-          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK_PATH" "$ANDROID_SDK_ROOT" > $CONF_DIR/local.properties
-          chmod +x $CONF_DIR/gradlew
+          SOURCE_DIR=$(pwd)/extracted/SourceFixed
+          KEYSTORE_PATH=$SOURCE_DIR/android/app/nettumi.keystore
 
-      - name: Flutter Dependencies & Build
-        working-directory: ${{ env.SOURCE_PATH }}
+          cat > $SOURCE_DIR/android/key.properties << 'EOF'
+          storePassword=Nettumi@123
+          keyPassword=Nettumi@123
+          keyAlias=nettumi_alias
+          storeFile=$KEYSTORE_PATH
+          EOF
+
+          # Fix storeFile path (substitute variable)
+          sed -i "s|\$KEYSTORE_PATH|$KEYSTORE_PATH|g" $SOURCE_DIR/android/key.properties
+
+          cat > $SOURCE_DIR/android/local.properties << EOF
+          flutter.sdk=$FLUTTER_SDK_PATH
+          sdk.dir=$ANDROID_SDK_ROOT
+          EOF
+
+          chmod +x $SOURCE_DIR/android/gradlew
+
+          echo "=== local.properties ==="
+          cat $SOURCE_DIR/android/local.properties
+          echo "=== key.properties ==="
+          cat $SOURCE_DIR/android/key.properties
+          echo "=== Keystore ==="
+          ls -la $KEYSTORE_PATH
+
+      - name: Accept Android licenses
+        run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      - name: Flutter pub get
+        working-directory: extracted/SourceFixed
         run: |
+          flutter config --android-sdk $ANDROID_SDK_ROOT
           flutter pub get
-          # Gradle ভার্সন বা ডিপেন্ডেন্সি জনিত এরর এড়াতে ভ্যালিডেশন স্কিপ ফ্ল্যাগ
-          flutter build apk --release --build-name=2.0.0 --build-number=2 --no-shrink --android-skip-build-dependency-validation
+
+      - name: Build Signed APK
+        working-directory: extracted/SourceFixed
+        run: |
+          flutter build apk --release \
+            --build-name=2.0.0 \
+            --build-number=2
+
+      - name: Show full Gradle error
+        if: failure()
+        working-directory: extracted/SourceFixed
+        run: |
+          echo "=== local.properties ==="
+          cat android/local.properties || true
+          echo "=== key.properties ==="
+          cat android/key.properties || true
+          echo "=== Keystore ==="
+          ls -la android/app/nettumi.keystore || true
+          echo "=== Gradle stacktrace ==="
+          cd android && ./gradlew assembleRelease --stacktrace 2>&1 | tail -150 || true
 
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Nettumi-Adda-Final-APK
-          path: ${{ env.SOURCE_PATH }}/build/app/outputs/flutter-apk/app-release.apk
-
-      - name: Debug on Failure
-        if: failure()
-        run: |
-          echo "=== Error Analysis ==="
-          ls -R extracted/ || echo "Extraction failed"
-          cd ${{ env.SOURCE_PATH }}/android && ./gradlew assembleRelease --stacktrace 2>&1 | tail -200
+          name: Nettumi-Adda-APK
+          path: extracted/SourceFixed/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
