@@ -46,8 +46,8 @@ jobs:
           FLUTTER_SDK=$(dirname $(dirname $(which flutter)))
           SRC=$GITHUB_WORKSPACE/extracted/SourceFixed
           KS_PATH=$SRC/android/app/nettumi.keystore
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KS_PATH" > $SRC/android/key.properties
-          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK" "$ANDROID_SDK_ROOT" > $SRC/android/local.properties
+          printf "storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n" "$KS_PATH" > $SRC/android/key.properties
+          printf "flutter.sdk=%s\nsdk.dir=%s\n" "$FLUTTER_SDK" "$ANDROID_SDK_ROOT" > $SRC/android/local.properties
           chmod +x $SRC/android/gradlew
 
       - name: Fix pubspec & pub get
@@ -67,73 +67,64 @@ jobs:
       - name: Create auto-fix Python script
         run: |
           cat > /tmp/fix_gradle.py << 'EOF'
-import os
-import re
-import sys
-import glob
+          import os
+          import re
+          import sys
+          import glob
 
-def fix_gradle(bg):
-    if not os.path.isfile(bg):
-        return
-    pkg = os.path.basename(os.path.dirname(os.path.dirname(bg)))
-    print(f"Fixing: {pkg}")
+          def fix_gradle(bg):
+              if not os.path.isfile(bg):
+                  return
+              pkg = os.path.basename(os.path.dirname(os.path.dirname(bg)))
+              print(f"Fixing: {pkg}")
 
-    with open(bg, 'r', errors='ignore') as f:
-        content = f.read()
+              with open(bg, 'r', errors='ignore') as f:
+                  content = f.read()
 
-    # FIX 1: Remove kotlinOptions block
-    content = re.sub(r'\s*kotlinOptions\s*\{[^}]*\}', '', content)
+              content = re.sub(r'\s*kotlinOptions\s*\{[^}]*\}', '', content)
 
-    # FIX 2: namespace
-    if 'namespace' not in content and 'android {' in content:
-        manifest = os.path.join(os.path.dirname(bg), 'src', 'main', 'AndroidManifest.xml')
-        ns = ''
-        if os.path.isfile(manifest):
-            m = re.search(r'package="([^"]+)"', open(manifest, errors='ignore').read())
-            if m:
-                ns = m.group(1)
-        if ns:
-            content = content.replace('android {', f"android {{\n    namespace '{ns}'", 1)
-            print(f"  [FIX] namespace={ns}")
+              if 'namespace' not in content and 'android {' in content:
+                  manifest = os.path.join(os.path.dirname(bg), 'src', 'main', 'AndroidManifest.xml')
+                  ns = ''
+                  if os.path.isfile(manifest):
+                      m = re.search(r'package="([^"]+)"', open(manifest, errors='ignore').read())
+                      if m:
+                          ns = m.group(1)
+                  if ns:
+                      content = content.replace('android {', f"android {{\n    namespace '{ns}'", 1)
+                      print(f"  [FIX] namespace={ns}")
 
-    # FIX 3: compileSdkVersion missing
-    if 'compileSdkVersion' not in content and 'compileSdk ' not in content:
-        if 'android {' in content:
-            content = content.replace('android {', 'android {\n    compileSdkVersion 34', 1)
-            print(f"  [FIX] compileSdkVersion 34 added")
-    else:
-        content = re.sub(r'compileSdkVersion\s+[0-2][0-9](?!\d)', 'compileSdkVersion 34', content)
-        content = re.sub(r'compileSdkVersion\s+3[0-2](?!\d)', 'compileSdkVersion 34', content)
+              if 'compileSdkVersion' not in content and 'compileSdk ' not in content:
+                  if 'android {' in content:
+                      content = content.replace('android {', 'android {\n    compileSdkVersion 34', 1)
+                      print(f"  [FIX] compileSdkVersion 34 added")
+              else:
+                  content = re.sub(r'compileSdkVersion\s+[0-2][0-9](?!\d)', 'compileSdkVersion 34', content)
+                  content = re.sub(r'compileSdkVersion\s+3[0-2](?!\d)', 'compileSdkVersion 34', content)
 
-    # FIX 4: JavaVersion
-    content = content.replace('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_17')
-    content = content.replace('JavaVersion.VERSION_11', 'JavaVersion.VERSION_17')
-    content = content.replace('JavaVersion.VERSION_1_7', 'JavaVersion.VERSION_17')
+              content = content.replace('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_17')
+              content = content.replace('JavaVersion.VERSION_11', 'JavaVersion.VERSION_17')
+              content = content.replace('JavaVersion.VERSION_1_7', 'JavaVersion.VERSION_17')
 
-    # FIX 5: compileOptions missing
-    if 'compileOptions' not in content and 'android {' in content:
-        content = content.replace('android {',
-            'android {\n    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }',
-            1)
-        print(f"  [FIX] compileOptions added")
+              if 'compileOptions' not in content and 'android {' in content:
+                  content = content.replace('android {',
+                      'android {\n    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }',
+                      1)
+                  print(f"  [FIX] compileOptions added")
 
-    with open(bg, 'w') as f:
-        f.write(content)
+              with open(bg, 'w') as f:
+                  f.write(content)
 
-pub_roots = [
-    os.path.expanduser('~/.pub-cache/hosted/pub.dev'),
-    os.path.expanduser('~/.pub-cache/hosted/pub.dev/hosted/pub.dev'),
-]
+          pub_roots = [
+              os.path.expanduser('~/.pub-cache/hosted/pub.dev'),
+          ]
 
-for root in pub_roots:
-    if not os.path.isdir(root):
-        continue
-    print(f"\n=== Scanning: {root} ===")
-    for bg in glob.glob(os.path.join(root, '**', 'android', 'build.gradle'), recursive=True):
-        fix_gradle(bg)
-
-print("\nDONE")
-EOF
+          for root in pub_roots:
+              if not os.path.isdir(root):
+                  continue
+              for bg in glob.glob(os.path.join(root, '**', 'android', 'build.gradle'), recursive=True):
+                  fix_gradle(bg)
+          EOF
           echo "Script created"
 
       - name: AUTO-FIX ENGINE — run Python fix
@@ -146,8 +137,36 @@ EOF
             [ -f "$BG" ] || continue
             MANIFEST="$AUDIO_DIR/android/src/main/AndroidManifest.xml"
             NS=$(grep -o 'package="[^"]*"' "$MANIFEST" 2>/dev/null | head -1 | sed 's/package="//;s/"//')
-            NS="${NS:-com.ryanheise.audio_session}"
-            printf "group 'com.ryanheise.audio_session'\nversion '1.0-SNAPSHOT'\n\nbuildscript {\n    repositories {\n        google()\n        mavenCentral()\n    }\n    dependencies {\n        classpath 'com.android.tools.build:gradle:8.3.0'\n        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24'\n    }\n}\n\napply plugin: 'com.android.library'\napply plugin: 'kotlin-android'\n\nandroid {\n    namespace '%s'\n    compileSdkVersion 34\n\n    compileOptions {\n        sourceCompatibility JavaVersion.VERSION_17\n        targetCompatibility JavaVersion.VERSION_17\n    }\n\n    defaultConfig {\n        minSdkVersion 21\n        targetSdkVersion 34\n    }\n\n    dependencies {\n        implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'\n    }\n}\n" "$NS" > "$BG"
+            if [ -z "$NS" ]; then NS="com.ryanheise.audio_session"; fi
+            
+            cat <<EOF > "$BG"
+          group 'com.ryanheise.audio_session'
+          version '1.0-SNAPSHOT'
+          buildscript {
+              repositories { google(); mavenCentral() }
+              dependencies {
+                  classpath 'com.android.tools.build:gradle:8.3.0'
+                  classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24'
+              }
+          }
+          apply plugin: 'com.android.library'
+          apply plugin: 'kotlin-android'
+          android {
+              namespace '$NS'
+              compileSdkVersion 34
+              compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }
+              defaultConfig {
+                  minSdkVersion 21
+                  targetSdkVersion 34
+              }
+              dependencies {
+                  implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'
+              }
+          }
+          EOF
             echo "audio_session rewritten: $BG (namespace=$NS)"
           done
 
@@ -175,7 +194,6 @@ EOF
           if [ "$BUILD_OK" = "0" ]; then
             echo "ATTEMPT 1 FAILED, re-running fix engine..."
             python3 /tmp/fix_gradle.py
-
             echo "════ ATTEMPT 2 ════"
             flutter build apk --release --build-name=2.0.0 --build-number=2 --android-skip-build-dependency-validation 2>&1 | tee /tmp/build2.log && BUILD_OK=1 || BUILD_OK=0
           fi
@@ -185,7 +203,6 @@ EOF
             flutter clean || true
             flutter pub get || true
             python3 /tmp/fix_gradle.py
-
             echo "════ ATTEMPT 3 ════"
             flutter build apk --release --build-name=2.0.0 --build-number=2 --android-skip-build-dependency-validation 2>&1 | tee /tmp/build3.log && BUILD_OK=1 || BUILD_OK=0
           fi
@@ -214,8 +231,4 @@ EOF
           for L in /tmp/build1.log /tmp/build2.log /tmp/build3.log; do
             [ -f "$L" ] && tail -40 "$L" || true
           done
-          echo "=== Missing namespace ==="
-          find "$HOME/.pub-cache" -name "build.gradle" -path "*/android/build.gradle" 2>/dev/null | while read BG; do
-            grep -q "namespace" "$BG" || echo "MISSING: $BG"
-          done || true
           flutter doctor -v || true
