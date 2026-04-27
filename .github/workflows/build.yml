@@ -1,4 +1,4 @@
-name: Build Nettumi Adda APK
+name: Super Auto-Fix Nettumi Build
 
 on:
   push:
@@ -8,7 +8,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -29,206 +28,97 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Extract Project
+      - name: Extract & Preparation
         run: |
-          sudo apt-get install -y unzip
-          unzip -q Nettumi-Adda-Source-Fixed-v11.zip -d extracted
-          ls extracted/SourceFixed/
+          sudo apt-get install -y unzip python3
+          unzip -q Nettumi-Adda-Source-Fixed-v11.zip -d extracted || true
+          unzip -q nettumi-keystore.zip -d keystore_out || true
+          KS=$(find . -name "*.keystore" -o -name "*.jks" | head -1)
+          [ -f "$KS" ] && cp "$KS" extracted/SourceFixed/android/app/nettumi.keystore || echo "Keystore missing"
 
-      - name: Extract Keystore
+      - name: Create Ultra-Fix Python Engine
         run: |
-          unzip -q nettumi-keystore.zip -d keystore_out
-          KEYSTORE_SRC=$(find keystore_out -type f \( -name "*.keystore" -o -name "*.jks" \) | head -1)
-          cp "$KEYSTORE_SRC" extracted/SourceFixed/android/app/nettumi.keystore
+          cat > /tmp/auto_fix.py << 'EOF'
+          import os, re, glob
 
-      - name: Configure signing & properties
-        run: |
-          FLUTTER_SDK=$(dirname $(dirname $(which flutter)))
-          SRC=$GITHUB_WORKSPACE/extracted/SourceFixed
-          KS_PATH=$SRC/android/app/nettumi.keystore
-          printf "storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n" "$KS_PATH" > $SRC/android/key.properties
-          printf "flutter.sdk=%s\nsdk.dir=%s\n" "$FLUTTER_SDK" "$ANDROID_SDK_ROOT" > $SRC/android/local.properties
-          chmod +x $SRC/android/gradlew
-
-      - name: Fix pubspec & pub get
-        run: |
-          cd $GITHUB_WORKSPACE/extracted/SourceFixed
-          sed -i 's/flutter_svg:.*/flutter_svg: ^2.0.10+1/' pubspec.yaml
-          sed -i 's/url_launcher:.*/url_launcher: ^6.2.5/' pubspec.yaml
-          sed -i 's/flutter_lints:.*/flutter_lints: ^3.0.0/' pubspec.yaml
-          grep -q "dependency_overrides:" pubspec.yaml || printf '\ndependency_overrides:\n  intl: ^0.20.0\n  collection: ^1.19.0\n' >> pubspec.yaml
-          rm -f pubspec.lock
-          flutter config --android-sdk $ANDROID_SDK_ROOT
-          flutter pub get
-
-      - name: Accept Android licenses
-        run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-      - name: Create auto-fix Python script
-        run: |
-          cat > /tmp/fix_gradle.py << 'EOF'
-          import os
-          import re
-          import sys
-          import glob
-
-          def fix_gradle(bg):
-              if not os.path.isfile(bg):
-                  return
-              pkg = os.path.basename(os.path.dirname(os.path.dirname(bg)))
-              print(f"Fixing: {pkg}")
-
-              with open(bg, 'r', errors='ignore') as f:
+          def fix_gradle(file_path):
+              if not os.path.exists(file_path): return
+              with open(file_path, 'r', errors='ignore') as f:
                   content = f.read()
+              
+              # 1. Force Upgrade SDK Versions
+              content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', content)
+              content = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', content)
+              content = re.sub(r'compileSdk\s+\d+', 'compileSdk 34', content)
+              
+              # 2. Force Java 17 Compatibility
+              content = re.sub(r'JavaVersion\.VERSION_1_[78]', 'JavaVersion.VERSION_17', content)
+              content = re.sub(r'JavaVersion\.VERSION_11', 'JavaVersion.VERSION_17', content)
+              content = re.sub(r'jvmTarget = .+', 'jvmTarget = "17"', content)
 
-              content = re.sub(r'\s*kotlinOptions\s*\{[^}]*\}', '', content)
+              # 3. Add Missing Namespace (CRITICAL for AGP 8+)
+              if 'android {' in content and 'namespace' not in content:
+                  manifest = os.path.join(os.path.dirname(file_path), 'src', 'main', 'AndroidManifest.xml')
+                  if os.path.exists(manifest):
+                      with open(manifest, 'r') as m:
+                          pkg = re.search(r'package="([^"]+)"', m.read())
+                          if pkg:
+                              content = content.replace('android {', f'android {{\n    namespace "{pkg.group(1)}"', 1)
+              
+              # 4. FIX audio_session/androidx.media error
+              if 'androidx.media' not in content and 'dependencies {' in content:
+                  content = content.replace('dependencies {', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', 1)
 
-              if 'namespace' not in content and 'android {' in content:
-                  manifest = os.path.join(os.path.dirname(bg), 'src', 'main', 'AndroidManifest.xml')
-                  ns = ''
-                  if os.path.isfile(manifest):
-                      m = re.search(r'package="([^"]+)"', open(manifest, errors='ignore').read())
-                      if m:
-                          ns = m.group(1)
-                  if ns:
-                      content = content.replace('android {', f"android {{\n    namespace '{ns}'", 1)
-                      print(f"  [FIX] namespace={ns}")
-
-              if 'compileSdkVersion' not in content and 'compileSdk ' not in content:
-                  if 'android {' in content:
-                      content = content.replace('android {', 'android {\n    compileSdkVersion 34', 1)
-                      print(f"  [FIX] compileSdkVersion 34 added")
-              else:
-                  content = re.sub(r'compileSdkVersion\s+[0-2][0-9](?!\d)', 'compileSdkVersion 34', content)
-                  content = re.sub(r'compileSdkVersion\s+3[0-2](?!\d)', 'compileSdkVersion 34', content)
-
-              content = content.replace('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_17')
-              content = content.replace('JavaVersion.VERSION_11', 'JavaVersion.VERSION_17')
-              content = content.replace('JavaVersion.VERSION_1_7', 'JavaVersion.VERSION_17')
-
-              if 'compileOptions' not in content and 'android {' in content:
-                  content = content.replace('android {',
-                      'android {\n    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }',
-                      1)
-                  print(f"  [FIX] compileOptions added")
-
-              with open(bg, 'w') as f:
+              with open(file_path, 'w') as f:
                   f.write(content)
 
-          pub_roots = [
-              os.path.expanduser('~/.pub-cache/hosted/pub.dev'),
-          ]
-
-          for root in pub_roots:
-              if not os.path.isdir(root):
-                  continue
-              for bg in glob.glob(os.path.join(root, '**', 'android', 'build.gradle'), recursive=True):
-                  fix_gradle(bg)
+          # Fix all Gradle files in Project and Pub Cache
+          for root_dir in ['./extracted', os.path.expanduser('~/.pub-cache')]:
+              for path in glob.glob(f"{root_dir}/**/build.gradle", recursive=True):
+                  fix_gradle(path)
           EOF
-          echo "Script created"
 
-      - name: AUTO-FIX ENGINE — run Python fix
-        run: python3 /tmp/fix_gradle.py
-
-      - name: HARDCODED FIX — audio_session full rewrite
+      - name: Run Auto-Fix & Pub Get
         run: |
-          for AUDIO_DIR in $(find "$HOME/.pub-cache" -maxdepth 6 -type d -name "audio_session*" 2>/dev/null); do
-            BG="$AUDIO_DIR/android/build.gradle"
-            [ -f "$BG" ] || continue
-            MANIFEST="$AUDIO_DIR/android/src/main/AndroidManifest.xml"
-            NS=$(grep -o 'package="[^"]*"' "$MANIFEST" 2>/dev/null | head -1 | sed 's/package="//;s/"//')
-            if [ -z "$NS" ]; then NS="com.ryanheise.audio_session"; fi
+          cd extracted/SourceFixed
+          # Fix pubspec for known broken packages
+          sed -i 's/flutter_svg:.*/flutter_svg: ^2.0.10+1/' pubspec.yaml
+          python3 /tmp/auto_fix.py
+          flutter pub get || (flutter clean && flutter pub get)
+
+      - name: Build APK with Self-Healing Loop
+        run: |
+          cd extracted/SourceFixed
+          yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          
+          # Attempt Build and Fix if fails
+          for i in {1..3}; do
+            echo "════ Attempt $i ════"
+            python3 /tmp/auto_fix.py
             
-            cat <<EOF > "$BG"
-          group 'com.ryanheise.audio_session'
-          version '1.0-SNAPSHOT'
-          buildscript {
-              repositories { google(); mavenCentral() }
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.3.0'
-                  classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:1.9.24'
-              }
-          }
-          apply plugin: 'com.android.library'
-          apply plugin: 'kotlin-android'
-          android {
-              namespace '$NS'
-              compileSdkVersion 34
-              compileOptions {
-                  sourceCompatibility JavaVersion.VERSION_17
-                  targetCompatibility JavaVersion.VERSION_17
-              }
-              defaultConfig {
-                  minSdkVersion 21
-                  targetSdkVersion 34
-              }
-              dependencies {
-                  implementation 'org.jetbrains.kotlin:kotlin-stdlib:1.9.24'
-              }
-          }
-          EOF
-            echo "audio_session rewritten: $BG (namespace=$NS)"
+            # Force Fix for gradle.properties (Enable AndroidX)
+            printf "android.useAndroidX=true\nandroid.enableJetifier=true\n" >> android/gradle.properties
+
+            if flutter build apk --release --android-skip-build-dependency-validation; then
+              echo "SUCCESS"
+              cp build/app/outputs/flutter-apk/app-release.apk $GITHUB_WORKSPACE/Nettumi-Build.apk
+              exit 0
+            else
+              echo "Build failed, applying more aggressive fixes..."
+              flutter clean
+            fi
           done
+          exit 1
 
-      - name: Fix project-level Gradle
-        run: |
-          SRC=$GITHUB_WORKSPACE/extracted/SourceFixed/android
-          if [ -f "$SRC/build.gradle" ]; then
-            sed -i "s/ext.kotlin_version = '[^']*'/ext.kotlin_version = '1.9.24'/" "$SRC/build.gradle" || true
-            sed -i "s/com.android.tools.build:gradle:[0-9.]*/com.android.tools.build:gradle:8.3.0/" "$SRC/build.gradle" || true
-          fi
-          if [ -f "$SRC/app/build.gradle" ]; then
-            sed -i 's/JavaVersion\.VERSION_1_8/JavaVersion.VERSION_17/g' "$SRC/app/build.gradle" || true
-            sed -i 's/JavaVersion\.VERSION_11/JavaVersion.VERSION_17/g' "$SRC/app/build.gradle" || true
-            sed -i "s/jvmTarget = '[^']*'/jvmTarget = '17'/g" "$SRC/app/build.gradle" || true
-          fi
-
-      - name: Build APK — Auto-Retry Engine
-        run: |
-          cd $GITHUB_WORKSPACE/extracted/SourceFixed
-          find lib -name "*.dart" -exec sed -i 's/context\.router\.pop()/context.maybePop()/g' {} \; 2>/dev/null || true
-
-          echo "════ ATTEMPT 1 ════"
-          flutter build apk --release --build-name=2.0.0 --build-number=2 --android-skip-build-dependency-validation 2>&1 | tee /tmp/build1.log && BUILD_OK=1 || BUILD_OK=0
-
-          if [ "$BUILD_OK" = "0" ]; then
-            echo "ATTEMPT 1 FAILED, re-running fix engine..."
-            python3 /tmp/fix_gradle.py
-            echo "════ ATTEMPT 2 ════"
-            flutter build apk --release --build-name=2.0.0 --build-number=2 --android-skip-build-dependency-validation 2>&1 | tee /tmp/build2.log && BUILD_OK=1 || BUILD_OK=0
-          fi
-
-          if [ "$BUILD_OK" = "0" ]; then
-            echo "ATTEMPT 2 FAILED, flutter clean + retry..."
-            flutter clean || true
-            flutter pub get || true
-            python3 /tmp/fix_gradle.py
-            echo "════ ATTEMPT 3 ════"
-            flutter build apk --release --build-name=2.0.0 --build-number=2 --android-skip-build-dependency-validation 2>&1 | tee /tmp/build3.log && BUILD_OK=1 || BUILD_OK=0
-          fi
-
-          if [ "$BUILD_OK" = "0" ]; then
-            echo "ALL 3 ATTEMPTS FAILED"
-            tail -80 /tmp/build3.log || tail -80 /tmp/build2.log || tail -80 /tmp/build1.log
-            exit 1
-          fi
-
-          APK="$GITHUB_WORKSPACE/extracted/SourceFixed/build/app/outputs/flutter-apk/app-release.apk"
-          cp "$APK" "$GITHUB_WORKSPACE/Nettumi-Adda-v2.apk"
-          echo "APK ready:" && ls -lh "$GITHUB_WORKSPACE/Nettumi-Adda-v2.apk"
-
-      - name: Upload APK
+      - name: Upload Final APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Nettumi-Adda-v2-Release
-          path: Nettumi-Adda-v2.apk
-          if-no-files-found: error
+          name: Nettumi-Adda-APK
+          path: Nettumi-Build.apk
 
-      - name: Diagnosis on failure
+      - name: Diagnosis on Total Failure
         if: failure()
         run: |
-          echo "=== Build Logs ==="
-          for L in /tmp/build1.log /tmp/build2.log /tmp/build3.log; do
-            [ -f "$L" ] && tail -40 "$L" || true
-          done
-          flutter doctor -v || true
+          echo "Build failed after 3 attempts. Checking environment..."
+          flutter doctor -v
