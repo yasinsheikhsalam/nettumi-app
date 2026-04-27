@@ -188,10 +188,21 @@ jobs:
             | grep -E "error:|Error:|FAILED|What went wrong|Caused by:" \
             | head -50 || true
 
+      - name: Find APK
+        if: success()
+        id: find_apk
+        run: |
+          APK=$(find extracted/ -name "app-release.apk" 2>/dev/null | head -1)
+          if [ -z "$APK" ]; then
+            APK=$(find extracted/ -name "*.apk" ! -name "*debug*" 2>/dev/null | head -1)
+          fi
+          echo "Found: $APK"
+          cp "$APK" /tmp/Nettumi-Adda-Release.apk
+
       - name: Upload APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Nettumi-Adda-Release-APK
-          path: extracted/SourceFixed/build/app/outputs/flutter-apk/app-release.apk
+          path: /tmp/Nettumi-Adda-Release.apk
           if-no-files-found: error
