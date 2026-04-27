@@ -1,83 +1,249 @@
-name: FINAL ABSOLUTE SOLUTION
+name: 🚀 FINAL ABSOLUTE SOLUTION - Ultra Power Build
 
 on:
   push:
     branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      force_rebuild:
+        description: 'Force rebuild?'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  FLUTTER_VERSION: '3.24.6'  # Stable LTS
+  JAVA_VERSION: '17'
+  GRADLE_VERSION: '8.7'
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: apk
+            build_cmd: "flutter build apk --release --no-tree-shake-icons"
+            artifact_name: "Nettumi-Release-APK"
+          - target: aab
+            build_cmd: "flutter build appbundle --release"
+            artifact_name: "Nettumi-Release-AAB"
+    
     steps:
-      - name: Checkout code
+      # ১. Code Checkout (সবচেয়ে নতুন)
+      - name: 📥 Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set up Environment
+      # ২. Java Setup (Optimized)
+      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
-          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
 
-      - name: Setup Flutter
+      # ৩. Flutter Setup (Cached)
+      - name: 🦋 Setup Flutter ${{ env.FLUTTER_VERSION }}
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.29.3'
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+          cache-key: flutter-${{ runner.os }}-${{ hashFiles('**/pubspec.lock') }}
 
-      - name: Force Extraction & Keystore
+      # ৪. Cache Dependencies (Speed Boost)
+      - name: ⚡ Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.pub-cache
+            ~/.gradle/caches
+            extracted/SourceFixed/.dart_tool
+          key: ${{ runner.os }}-flutter-${{ hashFiles('**/pubspec.lock') }}-${{ hashFiles('extracted/SourceFixed/pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-
+
+      # ৫. 🔓 NUCLEAR EXTRACTION & KEYSTORE (Error-Proof)
+      - name: 💣 NUCLEAR EXTRACTION & SECURE KEYSTORE
         run: |
-          unzip -q Nettumi-Adda-Source-Fixed-v11.zip -d extracted || true
+          # Create directories safely
           mkdir -p extracted/SourceFixed/android/app
-          unzip -q nettumi-keystore.zip -d temp_ks || true
-          find temp_ks -name "*" -type f -exec cp {} extracted/SourceFixed/android/app/nettumi.keystore \;
+          
+          # Extract source with error handling
+          if [ -f "Nettumi-Adda-Source-Fixed-v11.zip" ]; then
+            unzip -q "Nettumi-Adda-Source-Fixed-v11.zip" -d extracted/ || { echo "Source zip failed"; exit 1; }
+          else
+            echo "❌ Source ZIP not found! Upload Nettumi-Adda-Source-Fixed-v11.zip"
+            exit 1
+          fi
+          
+          # Secure keystore extraction
+          if [ -f "nettumi-keystore.zip" ]; then
+            unzip -q "nettumi-keystore.zip" -d temp_ks || { echo "Keystore zip failed"; exit 1; }
+            find temp_ks -name "*.keystore" -type f -exec cp {} extracted/SourceFixed/android/app/nettumi.keystore \;
+          else
+            echo "⚠️  Keystore ZIP not found - Debug build only"
+          fi
 
-      - name: The Nuclear Fix (Python)
+      # ৬. 🧬 ULTRA NUCLEAR FIX (Python Power)
+      - name: 🧬 ULTRA NUCLEAR FIX - All Errors Destroyed
         run: |
-          cat > /tmp/nuclear_fix.py << 'EOF'
-          import os, glob
+          cat > /tmp/ultra_nuclear_fix.py << 'EOF'
+          import os, glob, re, shutil
+          from pathlib import Path
 
-          # ১. pubspec.yaml পুরোপুরি নতুন করে সাজানো (ডুপ্লিকেট এরর চিরতরে বন্ধ)
-          pub_path = './extracted/SourceFixed/pubspec.yaml'
-          if os.path.exists(pub_path):
-              with open(pub_path, 'r') as f: lines = f.readlines()
-              new_content = []
+          ROOT = './extracted/SourceFixed'
+          
+          def log(msg):
+              print(f"🔧 {msg}")
+
+          # ১. pubspec.yaml - PERFECT CLEAN
+          pubspec_path = f'{ROOT}/pubspec.yaml'
+          if os.path.exists(pubspec_path):
+              log("Fixing pubspec.yaml")
+              with open(pubspec_path, 'r', encoding='utf-8') as f:
+                  lines = f.readlines()
+              
+              clean_lines = []
+              seen_deps = set()
+              
               for line in lines:
-                  if 'dependency_overrides:' in line: break
-                  new_content.append(line)
-              new_content.append("\ndependency_overrides:\n  intl: any\n  collection: any\n  meta: any\n  flutter_svg: ^2.0.10+1\n")
-              with open(pub_path, 'w') as f: f.writelines(new_content)
+                  line = line.strip()
+                  if line.startswith('dependencies:'):
+                      clean_lines.append(line + '\n')
+                      continue
+                  if line.startswith('  ') and ':' in line and not line.startswith('  #'):
+                      dep = line.split(':')[0].strip()
+                      if dep not in seen_deps:
+                          seen_deps.add(dep)
+                          clean_lines.append(line + '\n')
+                      continue
+                  clean_lines.append(line + '\n')
+              
+              # Add critical overrides
+              overrides = """
+dependency_overrides:
+  intl: ^0.19.0
+  collection: ^1.19.0
+  meta: ^1.12.0
+  flutter_svg: ^2.0.10+1
+  path_provider_android: ^2.1.2
+"""
+              clean_lines.append(overrides)
+              
+              with open(pubspec_path, 'w', encoding='utf-8') as f:
+                  f.writelines(clean_lines)
+              log("✅ pubspec.yaml fixed")
 
-          # ২. সব বিল্ড ফাইল একবারে ফিক্স
-          def fix_file(p):
-              if not os.path.isfile(p): return
-              with open(p, 'r', errors='ignore') as f: c = f.read()
-              import re
-              c = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', c)
-              c = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', c)
-              c = re.sub(r'JavaVersion\.VERSION_1_[781]', 'JavaVersion.VERSION_17', c)
-              if 'dependencies {' in c and 'androidx.media' not in c:
-                  c = c.replace('dependencies {', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', 1)
-              with open(p, 'w') as f: f.write(c)
+          # ২. Android Gradle Files - SDK 34 + Java 17
+          def fix_gradle(file_path):
+              if not os.path.isfile(file_path): return
+              with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                  content = f.read()
+              
+              # Critical fixes
+              fixes = {
+                  r'compileSdkVersion\s+\d+': 'compileSdkVersion 34',
+                  r'targetSdkVersion\s+\d+': 'targetSdkVersion 34',
+                  r'minSdkVersion\s+\d+': 'minSdkVersion 21',
+                  r'JavaVersion\.VERSION_1_[78]': 'JavaVersion.VERSION_17',
+                  r'classpath .*gradle:gradle-plugin': 'classpath "com.android.tools.build:gradle:8.2.2"',
+              }
+              
+              for pattern, replacement in fixes.items():
+                  content = re.sub(pattern, replacement, content)
+              
+              # Add missing media dependency
+              if 'dependencies {' in content and 'androidx.media' not in content:
+                  content = re.sub(r'dependencies\s*\{', r'dependencies {\n    implementation "androidx.media:media:1.6.0"', content)
+              
+              with open(file_path, 'w', encoding='utf-8') as f:
+                  f.write(content)
+              log(f"✅ Fixed: {file_path}")
 
-          for g in glob.glob("./extracted/**/build.gradle", recursive=True): fix_file(g)
-          for g in glob.glob(os.path.expanduser("~/.pub-cache") + "/**/build.gradle", recursive=True): fix_file(g)
+          # Apply to all gradle files
+          for pattern in ['**/build.gradle', '**/build.gradle.kts', 'build.gradle']:
+              for file in glob.glob(f'{ROOT}/**/{pattern}', recursive=True):
+                  fix_gradle(file)
+
+          # ৩. Key.properties auto-generate
+          key_props = f'{ROOT}/android/key.properties'
+          if not os.path.exists(key_props):
+              with open(key_props, 'w') as f:
+                  f.write("""storePassword=Nettumi@123
+keyPassword=Nettumi@123
+keyAlias=nettumi_alias
+storeFile=nettumi.keystore
+""")
+              log("✅ key.properties created")
+
+          # ৪. ProGuard rules
+          proguard_path = f'{ROOT}/android/app/proguard-rules.pro'
+          if not os.path.exists(proguard_path):
+              with open(proguard_path, 'w') as f:
+                  f.write("-keep class com.google.firebase.** { *; }\n")
+              log("✅ ProGuard rules added")
+
+          log("🎉 ULTRA NUCLEAR FIX COMPLETE!")
           EOF
-          python3 /tmp/nuclear_fix.py
 
-      - name: Build and Deliver
+          python3 /tmp/ultra_nuclear_fix.py
+
+      # ৭. 🚀 ULTRA BUILD PROCESS
+      - name: 🏗️ ULTRA FLUTTER BUILD - ${{ matrix.target.toUpperCase() }}
+        working-directory: ./extracted/SourceFixed
         run: |
-          cd extracted/SourceFixed
-          # কি-স্টোর সেটআপ
-          printf "storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n" > android/key.properties
+          # Ultra clean
+          flutter clean --force
+          rm -rf .dart_tool/build
           
-          # বিল্ড প্রসেস
-          flutter clean
-          flutter pub get
-          flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation
+          # Get dependencies with max retries
+          flutter pub get || flutter pub get || flutter pub get
           
-          cp build/app/outputs/flutter-apk/app-release.apk ../../Nettumi-Final-Success.apk
+          # Ultra build with all optimizations
+          ${{ matrix.build_cmd }} \
+            --no-tree-shake-icons \
+            --android-gradle-daemon \
+            --dart-define=FLUTTER_WEB=false \
+            --bundle-sksl-path=/tmp/sksl.json || true
+          
+          # Verify output
+          if [ "${{ matrix.target }}" = "apk" ]; then
+            ls -la build/app/outputs/flutter-apk/app-release.apk
+            cp build/app/outputs/flutter-apk/app-release.apk ../../Nettumi-${{ matrix.target.toUpperCase() }}-Success.apk
+          else
+            ls -la build/app/outputs/bundle/release/app-release.aab
+            cp build/app/outputs/bundle/release/app-release.aab ../../Nettumi-${{ matrix.target.toUpperCase() }}-Success.aab
+          fi
 
-      - name: Upload APK
+      # ৮. 📤 POWERFUL UPLOAD
+      - name: 📤 Upload ${{ matrix.artifact_name }}
         uses: actions/upload-artifact@v4
         with:
-          name: Download-Your-App-Here
-          path: Nettumi-Final-Success.apk
+          name: ${{ matrix.artifact_name }}
+          path: |
+            Nettumi-*.apk
+            Nettumi-*.aab
+          retention-days: 30
+          compression-level: 0
+
+      # ৯. 🎉 Success Notification
+      - name: 🎉 Build Success Notification
+        if: success()
+        run: |
+          echo "✅ FINAL ABSOLUTE SUCCESS!"
+          echo "📱 APK/AAB ready for download!"
+          echo "⚡ Build completed in ${{ github.run_number }}"
+
+  # Bonus: Notify on failure
+  notify:
+    needs: build
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚨 Build Failed Alert
+        run: echo "❌ ULTRA BUILD FAILED! Check logs above."
