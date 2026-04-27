@@ -1,4 +1,4 @@
-name: Extreme Autonomous Self-Healing Build
+name: God-Mode Autonomous Build
 
 on:
   push:
@@ -26,9 +26,8 @@ jobs:
         with:
           flutter-version: '3.29.3'
           channel: 'stable'
-          cache: false # ক্যাশ এরর এড়াতে ফলস করা হয়েছে
 
-      - name: Reset & Inject Keystore
+      - name: Prepare Workspace
         run: |
           sudo apt-get install -y unzip python3
           unzip -q Nettumi-Adda-Source-Fixed-v11.zip -d extracted || true
@@ -37,91 +36,86 @@ jobs:
           mkdir -p extracted/SourceFixed/android/app
           [ -f "$KS" ] && cp "$KS" extracted/SourceFixed/android/app/nettumi.keystore || echo "Keystore missing"
 
-      - name: Autonomous Healing Logic (Python)
+      - name: Advanced Intelligence Healing Engine
         run: |
-          cat > /tmp/autonomous_heal.py << 'EOF'
+          cat > /tmp/god_fixer.py << 'EOF'
           import os, re, glob
 
-          def auto_patch(file_path):
+          def smart_patch(file_path):
               if not os.path.exists(file_path) or os.path.isdir(file_path): return
               try:
                   with open(file_path, 'r', errors='ignore') as f:
                       content = f.read()
                   
-                  # ১. অ্যান্ড্রয়েড টার্গেট ফিক্স
+                  # ১. এনফোর্স অ্যান্ড্রয়েড এসডিকে ৩৪
                   content = re.sub(r'compileSdkVersion\s+\d+', 'compileSdkVersion 34', content)
                   content = re.sub(r'targetSdkVersion\s+\d+', 'targetSdkVersion 34', content)
                   content = re.sub(r'compileSdk\s+\d+', 'compileSdk 34', content)
                   
                   # ২. জাভা ১৭ কনফিগারেশন
                   content = re.sub(r'JavaVersion\.VERSION_1_[78]', 'JavaVersion.VERSION_17', content)
-                  content = re.sub(r'JavaVersion\.VERSION_11', 'JavaVersion.VERSION_17', content)
                   
-                  # ৩. অডিও সেশন / মিডিয়া এরর ফিক্স
-                  if 'dependencies {' in content and 'androidx.media' not in content:
-                      content = content.replace('dependencies {', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', 1)
+                  # ৩. নির্ভুল মিডিয়া ডিপেন্ডেন্সি ইনজেকশন (আগের ভুলটি এখানে ফিক্স করা হয়েছে)
+                  if 'dependencies {' in content and 'androidx.media:media' not in content:
+                      content = re.sub(r'dependencies\s*\{', 'dependencies {\n    implementation "androidx.media:media:1.6.0"', content)
                   
-                  # ৪. প্যাকেজ নেম / নেমস্পেস অটো-ম্যাচ
+                  # ৪. নেমস্পেস অটো-ফিক্স
                   if 'android {' in content and 'namespace' not in content:
-                      manifest_dir = os.path.dirname(file_path)
-                      manifest = os.path.join(manifest_dir, 'src', 'main', 'AndroidManifest.xml')
-                      if os.path.exists(manifest):
-                          with open(manifest, 'r') as m:
+                      manifest_path = os.path.join(os.path.dirname(file_path), 'src', 'main', 'AndroidManifest.xml')
+                      if os.path.exists(manifest_path):
+                          with open(manifest_path, 'r') as m:
                               pkg = re.search(r'package="([^"]+)"', m.read())
                               if pkg: content = content.replace('android {', f'android {{\n    namespace "{pkg.group(1)}"', 1)
 
                   with open(file_path, 'w') as f: f.write(content)
               except: pass
 
-          # প্রজেক্ট এবং সব ইন্টারনাল লাইব্রেরি স্ক্যান
-          for root in ['./extracted', os.path.expanduser('~/.pub-cache')]:
-              for bg in glob.glob(f"{root}/**/build.gradle", recursive=True):
-                  auto_patch(bg)
+          # প্রজেক্ট ও ক্যাশে থাকা সব ডিপেন্ডেন্সি ফিক্স করা
+          for target in ['./extracted', os.path.expanduser('~/.pub-cache')]:
+              for f in glob.glob(f"{target}/**/build.gradle", recursive=True):
+                  smart_patch(f)
           EOF
 
-      - name: Execute Autonomous Build Loop
+      - name: Ultimate Build Execution
         run: |
           cd extracted/SourceFixed
           yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
           
-          # ৫টি ভিন্ন শক্তিশালী উপায়ে বিল্ড চেষ্টা
-          for i in {1..5}; do
-            echo "══════════════════════════════════════"
-            echo "  AUTONOMOUS ATTEMPT $i"
-            echo "══════════════════════════════════════"
+          # ৫টি ধাপে বিল্ড সমাধান করার চেষ্টা
+          for attempt in {1..5}; do
+            echo "--- Autonomous Attempt $attempt ---"
             
-            # প্রতিবার লুপে ক্লিনআপ ও প্যাচ
-            python3 /tmp/autonomous_heal.py
+            # প্রোপার্টিজ ফিক্স
             printf "android.useAndroidX=true\nandroid.enableJetifier=true\n" > android/gradle.properties
             
-            # লেভেল ভিত্তিক ফোর্স ফিক্স
-            if [ $i -ge 2 ]; then
-               echo "Level 2: Nuclear cleaning pubspec..."
-               rm -rf .dart_tool/ pubspec.lock
+            # প্রতিবার লুপে পাইথন ইঞ্জিন রান করবে
+            python3 /tmp/god_fixer.py
+            
+            # লেভেল অনুযায়ী কঠোর ব্যবস্থা
+            if [ $attempt -eq 2 ]; then
+               rm -f pubspec.lock
                flutter pub get
             fi
-
-            if [ $i -ge 3 ]; then
-               echo "Level 3: Hardcoding dependency overrides..."
-               # pubspec-এ অটোমেটিক ওভাররাইড যোগ করা হচ্ছে যাতে কনফ্লিক্ট না হয়
-               grep -q "dependency_overrides:" pubspec.yaml || printf "\ndependency_overrides:\n  intl: any\n  collection: any\n" >> pubspec.yaml
+            
+            if [ $attempt -eq 3 ]; then
+               # কনফ্লিক্ট এড়াতে ডিপেন্ডেন্সি ওভাররাইড
+               printf "\ndependency_overrides:\n  intl: any\n  collection: any\n  meta: any\n" >> pubspec.yaml
                flutter pub get
             fi
 
             if flutter build apk --release --no-tree-shake-icons --android-skip-build-dependency-validation; then
-              echo "BUILD SUCCESS!"
-              cp build/app/outputs/flutter-apk/app-release.apk $GITHUB_WORKSPACE/Nettumi-Handover.apk
+              echo "BUILD SUCCESSFUL"
+              cp build/app/outputs/flutter-apk/app-release.apk $GITHUB_WORKSPACE/Nettumi-Final-Build.apk
               exit 0
             fi
             
-            echo "Attempt $i failed, escalating healing engine..."
             flutter clean
           done
           exit 1
 
-      - name: Handover APK
+      - name: Deliver APK
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Nettumi-Adda-APK
-          path: Nettumi-Handover.apk
+          name: Nettumi-Adda-Release
+          path: Nettumi-Final-Build.apk
