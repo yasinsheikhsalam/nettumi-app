@@ -14,7 +14,7 @@ on:
         type: boolean
 
 env:
-  FLUTTER_VERSION: '3.24.6'
+  FLUTTER_VERSION: '3.24.5'   # Changed to a stable & known version
   JAVA_VERSION: '17'
 
 jobs:
@@ -43,7 +43,7 @@ jobs:
             unzip -q "Nettumi-Adda-Source-Fixed-v11.zip" -d extracted/
             echo "✅ Source extracted successfully"
           else
-            echo "❌ Source ZIP (Nettumi-Adda-Source-Fixed-v11.zip) not found in repository root!"
+            echo "❌ Source ZIP (Nettumi-Adda-Source-Fixed-v11.zip) not found!"
             exit 1
           fi
           
@@ -52,22 +52,19 @@ jobs:
             find temp_ks -name "*.keystore" -exec cp {} extracted/SourceFixed/android/app/nettumi.keystore \;
             echo "✅ Keystore extracted"
           else
-            echo "⚠️ Keystore not found - continuing without signing"
+            echo "⚠️ Keystore not found"
           fi
 
-      # ================== Java Setup (এখন source extracted এর পর) ==================
+      # ================== Java Setup ==================
       - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
         uses: actions/setup-java@v4
         with:
           java-version: ${{ env.JAVA_VERSION }}
           distribution: 'temurin'
           cache: 'gradle'
-          # Cache শুধু extracted source-এর Gradle files-এর উপর
-          cache-dependency-path: |
-            extracted/SourceFixed/**/*.gradle*
-            extracted/SourceFixed/**/gradle-wrapper.properties
+          cache-dependency-path: extracted/SourceFixed/**/*.gradle*
 
-      # ================== Flutter Setup ==================
+      # ================== Flutter Setup (Fixed) ==================
       - name: 🦋 Setup Flutter ${{ env.FLUTTER_VERSION }}
         uses: subosito/flutter-action@v2
         with:
@@ -82,7 +79,7 @@ jobs:
           path: |
             \~/.pub-cache
             extracted/SourceFixed/.dart_tool
-          key: \( {{ runner.os }}-flutter- \){{ hashFiles('extracted/SourceFixed/pubspec.lock') }}
+          key: \( {{ runner.os }}-flutter- \){{ env.FLUTTER_VERSION }}-${{ hashFiles('extracted/SourceFixed/pubspec.lock') }}
           restore-keys: ${{ runner.os }}-flutter-
 
       # ================== ULTRA NUCLEAR FIX ==================
@@ -94,7 +91,6 @@ jobs:
           ROOT = '.'
           def log(m): print("🔧", m)
 
-          # pubspec fix
           if os.path.exists('pubspec.yaml'):
               with open('pubspec.yaml', 'r', encoding='utf-8') as f:
                   lines = f.readlines()
@@ -117,7 +113,6 @@ jobs:
                   f.writelines(clean)
               log("pubspec.yaml fixed")
 
-          # Gradle basic fixes
           for f in glob.glob('**/*gradle*', recursive=True):
               if not os.path.isfile(f): continue
               with open(f, 'r', encoding='utf-8', errors='ignore') as ff:
