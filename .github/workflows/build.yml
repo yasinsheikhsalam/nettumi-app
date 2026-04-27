@@ -34,39 +34,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: 'temurin'
-          cache: 'gradle'
-
-      - name: 🦋 Setup Flutter ${{ env.FLUTTER_VERSION }}
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: ${{ env.FLUTTER_VERSION }}
-          channel: 'stable'
-          cache: true
-
-      - name: ⚡ Cache Dependencies
-        uses: actions/cache@v4
-        with:
-          path: |
-            \~/.pub-cache
-            \~/.gradle/caches
-            extracted/SourceFixed/.dart_tool
-          key: \( {{ runner.os }}-flutter- \){{ hashFiles('**/pubspec.lock') }}
-          restore-keys: ${{ runner.os }}-flutter-
-
-      # ================== SOURCE & KEYSTORE EXTRACTION ==================
+      # ================== EXTRACTION FIRST ==================
       - name: 💣 NUCLEAR EXTRACTION & KEYSTORE
         run: |
           mkdir -p extracted/SourceFixed/android/app
           
           if [ -f "Nettumi-Adda-Source-Fixed-v11.zip" ]; then
             unzip -q "Nettumi-Adda-Source-Fixed-v11.zip" -d extracted/
+            echo "✅ Source extracted successfully"
           else
-            echo "❌ Source ZIP not found!"
+            echo "❌ Source ZIP (Nettumi-Adda-Source-Fixed-v11.zip) not found in repository root!"
             exit 1
           fi
           
@@ -75,20 +52,51 @@ jobs:
             find temp_ks -name "*.keystore" -exec cp {} extracted/SourceFixed/android/app/nettumi.keystore \;
             echo "✅ Keystore extracted"
           else
-            echo "⚠️ Keystore not found - continuing with debug mode"
+            echo "⚠️ Keystore not found - continuing without signing"
           fi
+
+      # ================== Java Setup (এখন source extracted এর পর) ==================
+      - name: ☕ Setup Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: 'temurin'
+          cache: 'gradle'
+          # Cache শুধু extracted source-এর Gradle files-এর উপর
+          cache-dependency-path: |
+            extracted/SourceFixed/**/*.gradle*
+            extracted/SourceFixed/**/gradle-wrapper.properties
+
+      # ================== Flutter Setup ==================
+      - name: 🦋 Setup Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+
+      # ================== Cache Dependencies ==================
+      - name: ⚡ Cache Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            \~/.pub-cache
+            extracted/SourceFixed/.dart_tool
+          key: \( {{ runner.os }}-flutter- \){{ hashFiles('extracted/SourceFixed/pubspec.lock') }}
+          restore-keys: ${{ runner.os }}-flutter-
 
       # ================== ULTRA NUCLEAR FIX ==================
       - name: 🧬 ULTRA NUCLEAR FIX
+        working-directory: ./extracted/SourceFixed
         run: |
           cat > /tmp/fix.py << 'EOF'
           import os, glob, re
-          ROOT = './extracted/SourceFixed'
+          ROOT = '.'
           def log(m): print("🔧", m)
 
           # pubspec fix
-          if os.path.exists(f'{ROOT}/pubspec.yaml'):
-              with open(f'{ROOT}/pubspec.yaml', 'r', encoding='utf-8') as f:
+          if os.path.exists('pubspec.yaml'):
+              with open('pubspec.yaml', 'r', encoding='utf-8') as f:
                   lines = f.readlines()
               clean = []
               seen = set()
@@ -105,12 +113,12 @@ jobs:
                       continue
                   clean.append(line)
               clean.append('\ndependency_overrides:\n  intl: ^0.19.0\n  collection: ^1.19.0\n')
-              with open(f'{ROOT}/pubspec.yaml', 'w', encoding='utf-8') as f:
+              with open('pubspec.yaml', 'w', encoding='utf-8') as f:
                   f.writelines(clean)
               log("pubspec.yaml fixed")
 
-          # Gradle fixes
-          for f in glob.glob(f'{ROOT}/**/*gradle*', recursive=True):
+          # Gradle basic fixes
+          for f in glob.glob('**/*gradle*', recursive=True):
               if not os.path.isfile(f): continue
               with open(f, 'r', encoding='utf-8', errors='ignore') as ff:
                   c = ff.read()
@@ -120,22 +128,15 @@ jobs:
               with open(f, 'w', encoding='utf-8') as ff:
                   ff.write(c)
               log(f"Fixed: {f}")
-
-          # key.properties
-          kp = f'{ROOT}/android/key.properties'
-          if not os.path.exists(kp):
-              with open(kp, 'w') as f:
-                  f.write("storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=nettumi.keystore\n")
-              log("key.properties created")
           EOF
           python3 /tmp/fix.py
 
-      # ================== BUILD STEP (সবচেয়ে গুরুত্বপূর্ণ - সহজ করা হয়েছে) ==================
+      # ================== BUILD ==================
       - name: 🏗️ Build ${{ matrix.target }}
         working-directory: ./extracted/SourceFixed
         run: |
           flutter clean
-          flutter pub get || flutter pub get
+          flutter pub get || flutter pub get || flutter pub get
 
           if [ "${{ matrix.target }}" = "apk" ]; then
             flutter build apk --release --no-tree-shake-icons
@@ -147,7 +148,7 @@ jobs:
 
           ls -la ../../Nettumi-*
 
-      # ================== UPLOAD ARTIFACT ==================
+      # ================== UPLOAD ==================
       - name: 📤 Upload ${{ matrix.artifact_name }}
         uses: actions/upload-artifact@v4
         with:
@@ -157,4 +158,4 @@ jobs:
 
       - name: 🎉 Success Message
         if: success()
-        run: echo "✅ Build Successful for ${{ matrix.target }} ! Artifact ready."
+        run: echo "✅ Build Successful for ${{ matrix.target }}!"
