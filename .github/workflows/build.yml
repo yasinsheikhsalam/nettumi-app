@@ -33,176 +33,87 @@ jobs:
         run: |
           sudo apt-get install -y unzip
           unzip -q Nettumi-Adda-Source-Fixed-v7.zip -d extracted
-          echo "Extracted files:"
+          echo "=== Extracted ==="
           ls extracted/SourceFixed/
 
       - name: Extract Keystore
         run: |
           unzip -q nettumi-keystore.zip -d keystore_out
           KEYSTORE_SRC=$(find keystore_out -type f \( -name "*.keystore" -o -name "*.jks" \) | head -1)
-          echo "Found keystore: $KEYSTORE_SRC"
+          echo "Keystore: $KEYSTORE_SRC"
           cp "$KEYSTORE_SRC" extracted/SourceFixed/android/app/nettumi.keystore
           ls -la extracted/SourceFixed/android/app/nettumi.keystore
 
       - name: Configure signing & properties
         run: |
           FLUTTER_SDK=$(dirname $(dirname $(which flutter)))
-          SRC=$(pwd)/extracted/SourceFixed
+          SRC=$GITHUB_WORKSPACE/extracted/SourceFixed
           KS_PATH=$SRC/android/app/nettumi.keystore
-
-          # Write key.properties - NO leading spaces, proper newlines
-          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KS_PATH" \
-            > $SRC/android/key.properties
-
-          # Write local.properties - NO leading spaces, proper newlines
-          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK" "$ANDROID_SDK_ROOT" \
-            > $SRC/android/local.properties
-
+          
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KS_PATH" > $SRC/android/key.properties
+          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK" "$ANDROID_SDK_ROOT" > $SRC/android/local.properties
           chmod +x $SRC/android/gradlew
+          
+          echo "local.properties:"; cat $SRC/android/local.properties
+          echo "key.properties:"; cat $SRC/android/key.properties
+          echo "Keystore:"; ls -la $KS_PATH
 
-          echo "=== local.properties ==="
-          cat $SRC/android/local.properties
-          echo "=== key.properties ==="
-          cat $SRC/android/key.properties
-
-      - name: Self-heal pubspec & dependencies
-        working-directory: extracted/SourceFixed
+      - name: Fix pubspec & pub get
         run: |
-          python3 - << 'PYEOF'
-          import re
-
-          with open('pubspec.yaml', 'r') as f:
-              content = f.read()
-
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed
+          
           # Fix known version conflicts
-          fixes = {
-              r'flutter_svg:\s*\^2\.[2-9]\.': 'flutter_svg: ^2.0.10+1\n  ',
-              r'url_launcher:\s*\^6\.3\.': 'url_launcher: ^6.2.5\n  ',
-              r'share_plus:\s*\^(?:[0-8]\.|9\.[01]\.|10\.0\.|11\.|12\.)': 'share_plus: ^10.1.0\n  ',
-              r'flutter_lints:\s*\^[4-9]\.': 'flutter_lints: ^3.0.0\n  ',
-          }
-
-          for pattern, replacement in fixes.items():
-              content = re.sub(pattern, replacement, content)
-
-          with open('pubspec.yaml', 'w') as f:
-              f.write(content)
-
-          print("pubspec.yaml self-heal complete")
-          PYEOF
-
-          # Remove stale lock file
+          sed -i 's/flutter_svg:.*/flutter_svg: ^2.0.10+1/' pubspec.yaml
+          sed -i 's/url_launcher:.*/url_launcher: ^6.2.5/' pubspec.yaml
+          sed -i 's/share_plus:.*/share_plus: ^10.1.0/' pubspec.yaml
+          sed -i 's/flutter_lints:.*/flutter_lints: ^3.0.0/' pubspec.yaml
+          sed -i '/dependency_overrides:/,/^[^ ]/{s/collection:.*/collection: ^1.19.0/}' pubspec.yaml
+          sed -i '/dependency_overrides:/,/^[^ ]/{s/intl:.*/intl: ^0.20.0/}' pubspec.yaml
+          
           rm -f pubspec.lock
+          
+          flutter config --android-sdk $ANDROID_SDK_ROOT
+          flutter pub get
 
       - name: Accept Android licenses
         run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Flutter pub get (with auto-retry)
-        working-directory: extracted/SourceFixed
+      - name: Build APK
         run: |
-          flutter config --android-sdk $ANDROID_SDK_ROOT
-
-          # Attempt 1: normal
-          if flutter pub get 2>&1 | tee /tmp/pub_out.txt; then
-            echo "pub get succeeded on first try"
-            exit 0
-          fi
-
-          echo "First attempt failed, auto-fixing..."
-          cat /tmp/pub_out.txt
-
-          # Auto-fix: parse error and apply fix
-          if grep -q "share_plus" /tmp/pub_out.txt; then
-            sed -i 's/share_plus:.*/share_plus: ^10.1.0/' pubspec.yaml
-          fi
-          if grep -q "flutter_svg" /tmp/pub_out.txt; then
-            sed -i 's/flutter_svg:.*/flutter_svg: ^2.0.10+1/' pubspec.yaml
-          fi
-          if grep -q "url_launcher" /tmp/pub_out.txt; then
-            sed -i 's/url_launcher:.*/url_launcher: ^6.2.5/' pubspec.yaml
-          fi
-          if grep -q "flutter_lints" /tmp/pub_out.txt; then
-            sed -i 's/flutter_lints:.*/flutter_lints: ^3.0.0/' pubspec.yaml
-          fi
-          if grep -q "collection" /tmp/pub_out.txt; then
-            sed -i 's/collection:.*/collection: ^1.19.0/' pubspec.yaml
-          fi
-          if grep -q "intl" /tmp/pub_out.txt; then
-            sed -i 's/intl:.*/intl: ^0.20.0/' pubspec.yaml
-          fi
-
-          # Attempt 2: after fixes
-          flutter pub get
-
-      - name: Build Signed APK (with auto-fix)
-        working-directory: extracted/SourceFixed
-        run: |
-          # Attempt 1
-          if flutter build apk --release \
-              --build-name=2.0.0 \
-              --build-number=2 \
-              --android-skip-build-dependency-validation \
-              2>&1 | tee /tmp/build_out.txt; then
-            echo "Build succeeded!"
-            exit 0
-          fi
-
-          echo "Build failed, analyzing error..."
-          cat /tmp/build_out.txt | grep -A3 "error:" | head -40 || true
-
-          # Auto-fix Dart errors
-          # Fix 1: router.pop() → maybePop()
-          find lib -name "*.dart" -exec \
-            sed -i 's/context\.router\.pop()/context.maybePop()/g' {} \;
-
-          # Fix 2: any remaining compile errors - add missing imports
-          if grep -q "FadeInUp\|FadeInDown\|FadeInLeft\|FadeInRight" /tmp/build_out.txt; then
-            for f in $(grep -rl "FadeIn" lib/); do
-              if ! grep -q "animate_do" "$f"; then
-                sed -i "1s/^/import 'package:animate_do\/animate_do.dart';\n/" "$f"
-              fi
-            done
-          fi
-
-          # Attempt 2: with --no-shrink fallback
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed
+          
+          # Fix dart errors before build
+          find lib -name "*.dart" -exec sed -i 's/context\.router\.pop()/context.maybePop()/g' {} \;
+          
           flutter build apk --release \
             --build-name=2.0.0 \
             --build-number=2 \
-            --android-skip-build-dependency-validation \
-            --no-shrink
-
-      - name: Show Gradle error details
-        if: failure()
-        working-directory: extracted/SourceFixed
-        run: |
-          echo "=== local.properties ==="
-          cat android/local.properties || true
-          echo "=== key.properties ==="
-          cat android/key.properties || true
-          echo "=== Keystore check ==="
-          ls -la android/app/nettumi.keystore || true
-          echo "=== pubspec.yaml (deps) ==="
-          grep -A3 "dependencies:" pubspec.yaml | head -30 || true
-          echo "=== Full Gradle stacktrace ==="
-          cd android && ./gradlew assembleRelease --stacktrace --info 2>&1 \
-            | grep -E "error:|Error:|FAILED|What went wrong|Caused by:" \
-            | head -50 || true
-
-      - name: Find APK
-        if: success()
-        id: find_apk
-        run: |
-          APK=$(find extracted/ -name "app-release.apk" 2>/dev/null | head -1)
-          if [ -z "$APK" ]; then
-            APK=$(find extracted/ -name "*.apk" ! -name "*debug*" 2>/dev/null | head -1)
-          fi
-          echo "Found: $APK"
-          cp "$APK" /tmp/Nettumi-Adda-Release.apk
+            --android-skip-build-dependency-validation
+          
+          # Confirm APK exists
+          echo "=== APK Output ==="
+          ls -la $GITHUB_WORKSPACE/extracted/SourceFixed/build/app/outputs/flutter-apk/
+          
+          # Copy to workspace root for easy upload
+          cp $GITHUB_WORKSPACE/extracted/SourceFixed/build/app/outputs/flutter-apk/app-release.apk \
+             $GITHUB_WORKSPACE/Nettumi-Adda-v2.apk
+          
+          echo "=== Final APK ==="
+          ls -lh $GITHUB_WORKSPACE/Nettumi-Adda-v2.apk
 
       - name: Upload APK
-        if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: Nettumi-Adda-Release-APK
-          path: /tmp/Nettumi-Adda-Release.apk
+          name: Nettumi-Adda-v2-Release
+          path: Nettumi-Adda-v2.apk
           if-no-files-found: error
+
+      - name: Show error on failure
+        if: failure()
+        run: |
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed || true
+          echo "=== pubspec.yaml ==="
+          cat pubspec.yaml | head -60 || true
+          echo "=== Gradle error ==="
+          cd android && ./gradlew assembleRelease --stacktrace 2>&1 \
+            | grep -E "error:|Error:|> " | head -30 || true
