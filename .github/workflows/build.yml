@@ -49,6 +49,213 @@ jobs:
           FLUTTER_SDK=$(dirname $(dirname $(which flutter)))
           SRC=$GITHUB_WORKSPACE/extracted/SourceFixed
           KS_PATH=$SRC/android/app/nettumi.keystore
+
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KS_PATH" > $SRC/android/key.properties
+          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK" "$ANDROID_SDK_ROOT" > $SRC/android/local.properties
+          chmod +x $SRC/android/gradlew
+
+          echo "local.properties:"; cat $SRC/android/local.properties
+          echo "key.properties:"; cat $SRC/android/key.properties
+          echo "Keystore:"; ls -la $KS_PATH
+
+      - name: Fix pubspec & pub get
+        run: |
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed
+
+          # Fix known version conflicts
+          sed -i 's/flutter_svg:.*/flutter_svg: ^2.0.10+1/' pubspec.yaml
+          sed -i 's/url_launcher:.*/url_launcher: ^6.2.5/' pubspec.yaml
+          sed -i 's/share_plus:.*/share_plus: ^10.1.0/' pubspec.yaml
+          sed -i 's/flutter_lints:.*/flutter_lints: ^3.0.0/' pubspec.yaml
+          sed -i '/dependency_overrides:/,/^[^ ]/{s/collection:.*/collection: ^1.19.0/}' pubspec.yaml
+          sed -i '/dependency_overrides:/,/^[^ ]/{s/intl:.*/intl: ^0.20.0/}' pubspec.yaml
+
+          rm -f pubspec.lock
+
+          flutter config --android-sdk $ANDROID_SDK_ROOT
+          flutter pub get
+
+      - name: Accept Android licenses
+        run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      # ─────────────────────────────────────────────────────────────────
+      # AUTO-FIX: image_gallery_saver namespace missing এবং অন্যান্য
+      # pub-cache প্যাকেজের namespace সমস্যা সমাধান করে
+      # ─────────────────────────────────────────────────────────────────
+      - name: Auto-Fix namespace for pub-cache packages
+        run: |
+          PUB_CACHE="$HOME/.pub-cache/hosted/pub.dev"
+
+          fix_namespace() {
+            local PKG_DIR="$1"
+            local NAMESPACE="$2"
+            local BUILD_GRADLE="$PKG_DIR/android/build.gradle"
+
+            if [ ! -f "$BUILD_GRADLE" ]; then
+              echo "Skipping $PKG_DIR (no build.gradle)"
+              return
+            fi
+
+            # Already has namespace? skip
+            if grep -q "namespace" "$BUILD_GRADLE"; then
+              echo "Already has namespace: $BUILD_GRADLE"
+              return
+            fi
+
+            echo "Adding namespace '$NAMESPACE' to $BUILD_GRADLE"
+
+            # Get package name from AndroidManifest if namespace not provided
+            if [ -z "$NAMESPACE" ]; then
+              NAMESPACE=$(grep -o 'package="[^"]*"' "$PKG_DIR/android/src/main/AndroidManifest.xml" 2>/dev/null | head -1 | sed 's/package="//;s/"//')
+            fi
+
+            if [ -z "$NAMESPACE" ]; then
+              echo "Could not detect namespace for $PKG_DIR, skipping"
+              return
+            fi
+
+            # Inject namespace into android { } block
+            sed -i "/^android {/a\\    namespace '${NAMESPACE}'" "$BUILD_GRADLE"
+            echo "Fixed: $BUILD_GRADLE with namespace=$NAMESPACE"
+          }
+
+          # ── image_gallery_saver ──
+          IGS_DIR=$(find "$PUB_CACHE" -maxdepth 2 -type d -name "image_gallery_saver*" | head -1)
+          if [ -n "$IGS_DIR" ]; then
+            fix_namespace "$IGS_DIR" "com.example.imagegallerysaver"
+          fi
+
+          # ── video_thumbnail ──
+          VT_DIR=$(find "$PUB_CACHE" -maxdepth 2 -type d -name "video_thumbnail*" | head -1)
+          if [ -n "$VT_DIR" ]; then
+            fix_namespace "$VT_DIR" "xyz.justsoft.video_thumbnail"
+          fi
+
+          # ── voice_message_package ──
+          VM_DIR=$(find "$PUB_CACHE" -maxdepth 2 -type d -name "voice_message_package*" | head -1)
+          if [ -n "$VM_DIR" ]; then
+            fix_namespace "$VM_DIR" "com.example.voice_message_package"
+          fi
+
+          # ── Generic auto-scan: fix ALL pub-cache packages missing namespace ──
+          echo "=== Generic scan for missing namespaces ==="
+          find "$PUB_CACHE" -name "build.gradle" -path "*/android/build.gradle" | while read BG; do
+            if ! grep -q "namespace" "$BG"; then
+              MANIFEST=$(dirname "$BG")/src/main/AndroidManifest.xml
+              NS=$(grep -o 'package="[^"]*"' "$MANIFEST" 2>/dev/null | head -1 | sed 's/package="//;s/"//')
+              if [ -n "$NS" ]; then
+                sed -i "/^android {/a\\    namespace '${NS}'" "$BG"
+                echo "Auto-fixed namespace='$NS' in $BG"
+              fi
+            fi
+          done
+
+      # ─────────────────────────────────────────────────────────────────
+      # AUTO-FIX: compileSdkVersion সমস্যা (পুরনো প্যাকেজে 31 এর নিচে)
+      # ─────────────────────────────────────────────────────────────────
+      - name: Auto-Fix compileSdkVersion in pub-cache
+        run: |
+          PUB_CACHE="$HOME/.pub-cache/hosted/pub.dev"
+          find "$PUB_CACHE" -name "build.gradle" -path "*/android/build.gradle" | while read BG; do
+            # compileSdkVersion 30 বা নিচে হলে 34 এ আপগ্রেড
+            if grep -qE "compileSdkVersion [0-2][0-9]|compileSdkVersion 3[0-2]" "$BG"; then
+              sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 34/g' "$BG"
+              sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 34/g' "$BG"
+              echo "Fixed compileSdkVersion in $BG"
+            fi
+          done
+
+      # ─────────────────────────────────────────────────────────────────
+      # AUTO-FIX: Kotlin version সমস্যা project-level gradle এ
+      # ─────────────────────────────────────────────────────────────────
+      - name: Auto-Fix Kotlin & AGP versions in project gradle
+        run: |
+          SRC=$GITHUB_WORKSPACE/extracted/SourceFixed/android
+
+          # build.gradle এ kotlin_version আপডেট
+          if [ -f "$SRC/build.gradle" ]; then
+            sed -i "s/ext.kotlin_version = '[^']*'/ext.kotlin_version = '1.9.24'/" "$SRC/build.gradle" || true
+            echo "=== android/build.gradle ===" && cat "$SRC/build.gradle"
+          fi
+
+          # settings.gradle এ AGP plugin version ঠিক করা
+          if [ -f "$SRC/settings.gradle" ]; then
+            echo "=== android/settings.gradle ===" && cat "$SRC/settings.gradle"
+          fi
+
+      - name: Build APK
+        run: |
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed
+
+          # Dart source fix
+          find lib -name "*.dart" -exec sed -i 's/context\.router\.pop()/context.maybePop()/g' {} \;
+
+          flutter build apk --release \
+            --build-name=2.0.0 \
+            --build-number=2 \
+            --android-skip-build-dependency-validation
+
+          echo "=== APK Output ==="
+          ls -la $GITHUB_WORKSPACE/extracted/SourceFixed/build/app/outputs/flutter-apk/
+
+          cp $GITHUB_WORKSPACE/extracted/SourceFixed/build/app/outputs/flutter-apk/app-release.apk \
+             $GITHUB_WORKSPACE/Nettumi-Adda-v2.apk
+
+          echo "=== Final APK ==="
+          ls -lh $GITHUB_WORKSPACE/Nettumi-Adda-v2.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nettumi-Adda-v2-Release
+          path: Nettumi-Adda-v2.apk
+          if-no-files-found: error
+
+      # ─────────────────────────────────────────────────────────────────
+      # BUILD FAILED হলে → Auto-diagnose & retry
+      # ─────────────────────────────────────────────────────────────────
+      - name: Auto-Diagnose on failure
+        if: failure()
+        run: |
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed || true
+          echo ""
+          echo "════════════════════════════════════════"
+          echo "         BUILD FAILED - DIAGNOSIS"
+          echo "════════════════════════════════════════"
+          echo ""
+
+          echo "=== pubspec.yaml (first 80 lines) ==="
+          head -80 pubspec.yaml || true
+
+          echo ""
+          echo "=== Gradle stacktrace ==="
+          cd android && ./gradlew assembleRelease --stacktrace 2>&1 | tail -60 || true
+
+          echo ""
+          echo "=== All pub-cache build.gradle files without namespace ==="
+          find "$HOME/.pub-cache" -name "build.gradle" -path "*/android/build.gradle" | while read BG; do
+            if ! grep -q "namespace" "$BG"; then
+              echo "MISSING NAMESPACE: $BG"
+            fi
+          done || true
+
+          echo ""
+          echo "=== Flutter doctor ==="
+          flutter doctor -v || true          ls extracted/SourceFixed/
+
+      - name: Extract Keystore
+        run: |
+          unzip -q nettumi-keystore.zip -d keystore_out
+          KEYSTORE_SRC=$(find keystore_out -type f \( -name "*.keystore" -o -name "*.jks" \) | head -1)
+          echo "Keystore: $KEYSTORE_SRC"
+          cp "$KEYSTORE_SRC" extracted/SourceFixed/android/app/nettumi.keystore
+          ls -la extracted/SourceFixed/android/app/nettumi.keystore
+
+      - name: Configure signing & properties
+        run: |
+          FLUTTER_SDK=$(dirname $(dirname $(which flutter)))
+          SRC=$GITHUB_WORKSPACE/extracted/SourceFixed
+          KS_PATH=$SRC/android/app/nettumi.keystore
           
           printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KS_PATH" > $SRC/android/key.properties
           printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK" "$ANDROID_SDK_ROOT" > $SRC/android/local.properties
