@@ -32,9 +32,91 @@ jobs:
       - name: Extract Project
         run: |
           sudo apt-get install -y unzip
-          unzip -q Nettumi-Adda-Source-Fixed-v9.zip -d extracted
+          unzip -q Nettumi-Adda-Source-Fixed-v11.zip -d extracted
           echo "=== Extracted ==="
           ls extracted/SourceFixed/
+
+      - name: Extract Keystore
+        run: |
+          unzip -q nettumi-keystore.zip -d keystore_out
+          KEYSTORE_SRC=$(find keystore_out -type f \( -name "*.keystore" -o -name "*.jks" \) | head -1)
+          echo "Keystore: $KEYSTORE_SRC"
+          cp "$KEYSTORE_SRC" extracted/SourceFixed/android/app/nettumi.keystore
+          ls -la extracted/SourceFixed/android/app/nettumi.keystore
+
+      - name: Configure signing & properties
+        run: |
+          FLUTTER_SDK=$(dirname $(dirname $(which flutter)))
+          SRC=$GITHUB_WORKSPACE/extracted/SourceFixed
+          KS_PATH=$SRC/android/app/nettumi.keystore
+          
+          printf 'storePassword=Nettumi@123\nkeyPassword=Nettumi@123\nkeyAlias=nettumi_alias\nstoreFile=%s\n' "$KS_PATH" > $SRC/android/key.properties
+          printf 'flutter.sdk=%s\nsdk.dir=%s\n' "$FLUTTER_SDK" "$ANDROID_SDK_ROOT" > $SRC/android/local.properties
+          chmod +x $SRC/android/gradlew
+          
+          echo "local.properties:"; cat $SRC/android/local.properties
+          echo "key.properties:"; cat $SRC/android/key.properties
+          echo "Keystore:"; ls -la $KS_PATH
+
+      - name: Fix pubspec & pub get
+        run: |
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed
+          
+          # Fix known version conflicts
+          sed -i 's/flutter_svg:.*/flutter_svg: ^2.0.10+1/' pubspec.yaml
+          sed -i 's/url_launcher:.*/url_launcher: ^6.2.5/' pubspec.yaml
+          sed -i 's/share_plus:.*/share_plus: ^10.1.0/' pubspec.yaml
+          sed -i 's/flutter_lints:.*/flutter_lints: ^3.0.0/' pubspec.yaml
+          sed -i '/dependency_overrides:/,/^[^ ]/{s/collection:.*/collection: ^1.19.0/}' pubspec.yaml
+          sed -i '/dependency_overrides:/,/^[^ ]/{s/intl:.*/intl: ^0.20.0/}' pubspec.yaml
+          
+          rm -f pubspec.lock
+          
+          flutter config --android-sdk $ANDROID_SDK_ROOT
+          flutter pub get
+
+      - name: Accept Android licenses
+        run: yes | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --licenses || true
+
+      - name: Build APK
+        run: |
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed
+          
+          # Fix dart errors before build
+          find lib -name "*.dart" -exec sed -i 's/context\.router\.pop()/context.maybePop()/g' {} \;
+          
+          flutter build apk --release \
+            --build-name=2.0.0 \
+            --build-number=2 \
+            --android-skip-build-dependency-validation
+          
+          # Confirm APK exists
+          echo "=== APK Output ==="
+          ls -la $GITHUB_WORKSPACE/extracted/SourceFixed/build/app/outputs/flutter-apk/
+          
+          # Copy to workspace root for easy upload
+          cp $GITHUB_WORKSPACE/extracted/SourceFixed/build/app/outputs/flutter-apk/app-release.apk \
+             $GITHUB_WORKSPACE/Nettumi-Adda-v2.apk
+          
+          echo "=== Final APK ==="
+          ls -lh $GITHUB_WORKSPACE/Nettumi-Adda-v2.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nettumi-Adda-v2-Release
+          path: Nettumi-Adda-v2.apk
+          if-no-files-found: error
+
+      - name: Show error on failure
+        if: failure()
+        run: |
+          cd $GITHUB_WORKSPACE/extracted/SourceFixed || true
+          echo "=== pubspec.yaml ==="
+          cat pubspec.yaml | head -60 || true
+          echo "=== Gradle error ==="
+          cd android && ./gradlew assembleRelease --stacktrace 2>&1 \
+            | grep -E "error:|Error:|> " | head -30 || true          ls extracted/SourceFixed/
 
       - name: Extract Keystore
         run: |
