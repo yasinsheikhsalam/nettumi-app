@@ -1,0 +1,11 @@
+network:
+  use_tor: true            # Use Tor network for anonymity
+  proxies:                 # List of your proxies (optional)
+    - "socks5://user:pass@1.2.3.4:1080"
+  
+behavior:
+  default_effort: "high"   # Always think deep
+  auto_jailbreak: true     # Automatically add DAN prompts
+  
+storage:
+  vector_db_path: "./memory" # Where to store agent's "eternal" memory
